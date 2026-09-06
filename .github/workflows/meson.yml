@@ -60,7 +60,7 @@ jobs:
 
   macos:
     name: macOS
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -249,6 +249,12 @@ jobs:
           build-wasm/test/wasm/pugl_wasm_input.html
           --pugl-input
           --diagnostics-dir build-wasm/browser-diagnostics/input
+      - name: Run services browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_services.html
+          --passive
+          --diagnostics-dir build-wasm/browser-diagnostics/services
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
