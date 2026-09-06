@@ -45,6 +45,7 @@ executable(
 executable(
   'pugl_wasm_services',
   'test_services.c',
+  'test_browser_semantics.c',
   c_args: test_c_args,
   dependencies: [pugl_dep, pugl_stub_dep],
   install: false,
