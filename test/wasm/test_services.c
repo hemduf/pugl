@@ -17,6 +17,7 @@ typedef struct {
   unsigned   clientEvents;
   unsigned   timer7Events;
   unsigned   timer9Events;
+  unsigned   teardownTimerEvents;
   unsigned   timer7AtStop;
   unsigned   timer9AtStop;
   bool       clientOrderOk;
@@ -70,12 +71,37 @@ onEvent(PuglView* const view, const PuglEvent* const event)
       ++state.timer7Events;
     } else if (event->timer.id == 9U) {
       ++state.timer9Events;
+    } else if (event->timer.id == 13U) {
+      ++state.teardownTimerEvents;
     } else {
       state.clientOrderOk = false;
     }
   }
 
   return PUGL_SUCCESS;
+}
+
+static bool
+startAndDestroyTimerView(void)
+{
+  PuglView* const view = puglNewView(state.world);
+  if (!view) {
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, onEvent);
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);
+
+  const bool started = !puglShow(view, PUGL_SHOW_PASSIVE) &&
+                       !puglStartTimer(view, 13U, 0.010);
+  if (!started || puglUnrealize(view)) {
+    puglFreeView(view);
+    return false;
+  }
+
+  puglFreeView(view);
+  return true;
 }
 
 static void
@@ -112,19 +138,21 @@ finishServices(void* const data)
   const bool pass =
     state.view && state.clientEvents == 1U && state.clientOrderOk &&
     state.timer7Restarted && state.timer7Events > state.timer7AtStop &&
-    state.timer9AtStop >= 3U && state.timer9Events == state.timer9AtStop;
+    state.timer9AtStop >= 3U && state.timer9Events == state.timer9AtStop &&
+    state.teardownTimerEvents == 0U;
 
   if (!pass) {
     fprintf(stderr,
             "Service checks failed: client=%u order=%d timer7=%u stop7=%u "
-            "restart=%d timer9=%u stop9=%u\n",
+            "restart=%d timer9=%u stop9=%u teardown=%u\n",
             state.clientEvents,
             state.clientOrderOk,
             state.timer7Events,
             state.timer7AtStop,
             state.timer7Restarted,
             state.timer9Events,
-            state.timer9AtStop);
+            state.timer9AtStop,
+            state.teardownTimerEvents);
   }
 
   finish(pass);
@@ -156,8 +184,9 @@ main(void)
   client.client.data2 = 0x5678U;
 
   if (puglSendEvent(state.view, &client) || state.clientEvents != 1U ||
-      !state.clientOrderOk || puglStartTimer(state.view, 7U, 0.020) ||
-      puglStartTimer(state.view, 9U, 0.025)) {
+      !state.clientOrderOk || !puglStopTimer(state.view, 99U) ||
+      puglStartTimer(state.view, 7U, 0.020) ||
+      puglStartTimer(state.view, 9U, 0.025) || !startAndDestroyTimerView()) {
     finish(false);
     return 0;
   }
