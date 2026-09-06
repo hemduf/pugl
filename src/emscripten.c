@@ -234,8 +234,8 @@ EM_JS(void, puglBrowserUninstallDrop, (const char* selector), {
   delete element.__puglDrop;
 });
 
-EM_JS(int, puglBrowserSetCursor, (uintptr_t id, int cursor), {
-  const element = document.getElementById(`pugl-view-${id}`);
+EM_JS(int, puglBrowserSetCursor, (const char* selector, int cursor), {
+  const element = document.querySelector(UTF8ToString(selector));
   if (!element) {
     return 0;
   }
@@ -645,6 +645,9 @@ puglCreateDomView(const PuglView* const view,
            "(()=>{if(typeof document==='undefined'||!document.body)return 0;"
            "const id='pugl-view-%" PRIuPTR "';"
            "if(document.getElementById(id))return 0;"
+           "const p='%" PRIuPTR "';"
+           "const host=p!=='0'?document.querySelector('[data-pugl-native-view=\"'+p+'\"]'):document.body;"
+           "if(!host)return 0;"
            "const e=document.createElement('canvas');"
            "e.id=id;e.dataset.puglView='%" PRIuPTR "';e.tabIndex=0;"
            "e.style.boxSizing='border-box';e.style.display='none';"
@@ -654,9 +657,10 @@ puglCreateDomView(const PuglView* const view,
            "?window.devicePixelRatio:1;"
            "e.width=Math.max(1,Math.round(%u*r));"
            "e.height=Math.max(1,Math.round(%u*r));"
-           "document.body.appendChild(e);return 1;})()",
+           "host.appendChild(e);return 1;})()",
            view->impl->id,
            view->impl->id,
+           (uintptr_t)view->parent,
            position.x,
            position.y,
            size.width,
@@ -1581,6 +1585,7 @@ puglSetCursor(PuglView* const view, const PuglCursor cursor)
     return PUGL_FAILURE;
   }
 
-  return puglBrowserSetCursor(view->impl->id, (int)cursor) ? PUGL_SUCCESS
-                                                           : PUGL_FAILURE;
+  return puglBrowserSetCursor(view->impl->canvasSelector, (int)cursor)
+           ? PUGL_SUCCESS
+           : PUGL_FAILURE;
 }
