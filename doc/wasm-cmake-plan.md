@@ -1,4 +1,3 @@
-<!-- Copyright 2026 Fabrizio Duhem -->
 <!-- SPDX-License-Identifier: 0BSD OR ISC -->
 
 # WebAssembly/Emscripten, CMake, and Meson delivery plan
