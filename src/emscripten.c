@@ -30,7 +30,41 @@ struct PuglBrowserTimerImpl {
   long              intervalId;
 };
 
+typedef struct {
+  char*          type;
+  unsigned char* data;
+  size_t         len;
+} PuglBrowserClipboard;
+
 static PuglBrowserTimer* puglBrowserTimers = NULL;
+static PuglBrowserClipboard puglBrowserClipboard = {NULL, NULL, 0U};
+
+EM_JS(int, puglBrowserWriteClipboardText, (const char* text), {
+  if (typeof navigator === 'undefined' || !navigator.clipboard ||
+      typeof navigator.clipboard.writeText !== 'function') {
+    return 0;
+  }
+
+  const value = UTF8ToString(text);
+  const body = typeof document !== 'undefined' ? document.body : null;
+  if (body) {
+    body.dataset.puglClipboardWrite = 'pending';
+  }
+
+  navigator.clipboard.writeText(value).then(
+    () => {
+      if (body) {
+        body.dataset.puglClipboardWrite = 'success';
+      }
+    },
+    () => {
+      if (body) {
+        body.dataset.puglClipboardWrite = 'denied';
+      }
+    });
+
+  return 1;
+});
 
 static PuglBrowserTimer*
 puglFindBrowserTimer(PuglView* const view, const uintptr_t id)
@@ -789,12 +823,41 @@ puglSetClipboard(PuglView* const     view,
                  const void* const   data,
                  const size_t        len)
 {
-  (void)view;
-  (void)clipboard;
-  (void)type;
-  (void)data;
-  (void)len;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || !view->impl->id || !type || (!data && len)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (clipboard != PUGL_CLIPBOARD_GENERAL || strcmp(type, "text/plain")) {
+    return PUGL_UNSUPPORTED;
+  }
+
+  const size_t typeLen = strlen(type);
+  char* const newType = (char*)malloc(typeLen + 1U);
+  unsigned char* const newData = (unsigned char*)malloc(len + 1U);
+  if (!newType || !newData) {
+    free(newType);
+    free(newData);
+    return PUGL_NO_MEMORY;
+  }
+
+  memcpy(newType, type, typeLen + 1U);
+  if (len) {
+    memcpy(newData, data, len);
+  }
+  newData[len] = '\0';
+
+  if (!puglBrowserWriteClipboardText((const char*)newData)) {
+    free(newType);
+    free(newData);
+    return PUGL_UNSUPPORTED;
+  }
+
+  free(puglBrowserClipboard.type);
+  free(puglBrowserClipboard.data);
+  puglBrowserClipboard.type = newType;
+  puglBrowserClipboard.data = newData;
+  puglBrowserClipboard.len  = len;
+  return PUGL_SUCCESS;
 }
 
 const void*
