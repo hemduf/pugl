@@ -30,6 +30,7 @@ typedef struct {
   bool       timer7Restarted;
   bool       clipboardOfferOk;
   bool       clipboardDataOk;
+  bool       clipboardSecurityOk;
 } TestState;
 
 static TestState state = {0};
@@ -60,6 +61,56 @@ finish(const bool pass)
   }
 
   setResult(pass);
+}
+
+static bool
+exerciseClipboardSecurityPaths(PuglView* const view)
+{
+  const int unavailable = emscripten_run_script_int(
+    "(()=>{const c=typeof navigator!=='undefined'?navigator.clipboard:null;"
+    "if(!c)return 0;try{"
+    "Object.defineProperty(c,'writeText',{configurable:true,value:undefined});"
+    "Object.defineProperty(c,'readText',{configurable:true,value:undefined});"
+    "}catch(_){return 0;}"
+    "return typeof c.writeText==='undefined'&&typeof c.readText==='undefined';"
+    "})()");
+
+  if (!unavailable ||
+      puglSetClipboard(view,
+                       PUGL_CLIPBOARD_GENERAL,
+                       "text/plain",
+                       clipboardText,
+                       strlen(clipboardText)) != PUGL_UNSUPPORTED ||
+      puglPaste(view) != PUGL_UNSUPPORTED) {
+    return false;
+  }
+
+  size_t      len  = 0U;
+  const void* data =
+    puglGetClipboard(view, PUGL_CLIPBOARD_GENERAL, 0U, &len);
+  if (!data || len != strlen(clipboardText) ||
+      memcmp(data, clipboardText, len)) {
+    return false;
+  }
+
+  const int denied = emscripten_run_script_int(
+    "(()=>{const c=typeof navigator!=='undefined'?navigator.clipboard:null;"
+    "if(!c)return 0;try{"
+    "Object.defineProperty(c,'writeText',{configurable:true,value:()=>"
+    "Promise.reject(new Error('clipboard write denied'))});"
+    "Object.defineProperty(c,'readText',{configurable:true,value:()=>"
+    "Promise.reject(new Error('clipboard read denied'))});"
+    "}catch(_){return 0;}"
+    "return typeof c.writeText==='function'&&typeof c.readText==='function';"
+    "})()");
+
+  return denied &&
+         puglSetClipboard(view,
+                          PUGL_CLIPBOARD_GENERAL,
+                          "text/plain",
+                          clipboardText,
+                          strlen(clipboardText)) == PUGL_SUCCESS &&
+         puglPaste(view) == PUGL_SUCCESS;
 }
 
 static PuglStatus
@@ -109,6 +160,10 @@ onEvent(PuglView* const view, const PuglEvent* const event)
       event->data.clipboard == PUGL_CLIPBOARD_GENERAL &&
       event->data.typeIndex == 0U && data && len == strlen(clipboardText) &&
       !memcmp(data, clipboardText, len);
+
+    if (state.clipboardDataEvents == 1U) {
+      state.clipboardSecurityOk = exerciseClipboardSecurityPaths(view);
+    }
   }
 
   return PUGL_SUCCESS;
@@ -252,19 +307,25 @@ finishServices(void* const data)
 {
   (void)data;
 
+  const int writeDenied = emscripten_run_script_int(
+    "document.body.dataset.puglClipboardWrite==='denied'");
+  const int readDenied = emscripten_run_script_int(
+    "document.body.dataset.puglClipboardRead==='denied'");
+
   const bool pass =
     state.view && state.clientEvents == 1U && state.clientOrderOk &&
     state.timer7Restarted && state.timer7Events > state.timer7AtStop &&
     state.timer9AtStop >= 3U && state.timer9Events == state.timer9AtStop &&
     state.teardownTimerEvents == 0U && state.clipboardOffers == 1U &&
     state.clipboardDataEvents == 1U && state.clipboardOfferOk &&
-    state.clipboardDataOk;
+    state.clipboardDataOk && state.clipboardSecurityOk && writeDenied &&
+    readDenied;
 
   if (!pass) {
     fprintf(stderr,
             "Service checks failed: client=%u order=%d timer7=%u stop7=%u "
             "restart=%d timer9=%u stop9=%u teardown=%u offers=%u data=%u "
-            "offerOk=%d dataOk=%d\n",
+            "offerOk=%d dataOk=%d securityOk=%d writeDenied=%d readDenied=%d\n",
             state.clientEvents,
             state.clientOrderOk,
             state.timer7Events,
@@ -276,7 +337,10 @@ finishServices(void* const data)
             state.clipboardOffers,
             state.clipboardDataEvents,
             state.clipboardOfferOk,
-            state.clipboardDataOk);
+            state.clipboardDataOk,
+            state.clipboardSecurityOk,
+            writeDenied,
+            readDenied);
   }
 
   finish(pass);

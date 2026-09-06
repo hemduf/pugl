@@ -86,7 +86,9 @@ jobs:
       - name: Build
         run: meson compile -C build
       - name: Test
-        run: meson test -C build --print-errorlogs
+        # Run the complete native suite serially so timing-sensitive upstream
+        # timer checks are not perturbed by concurrent GUI tests on hosted VMs.
+        run: meson test -C build --print-errorlogs --num-processes 1
 
   windows:
     name: Windows
