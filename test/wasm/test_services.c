@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 typedef struct {
   PuglWorld* world;
@@ -104,6 +105,38 @@ startAndDestroyTimerView(void)
   return true;
 }
 
+static bool
+verifyStoredClipboard(const char* const expected, const size_t expectedLen)
+{
+  if (puglGetNumClipboardTypes(state.view, PUGL_CLIPBOARD_GENERAL) != 1U ||
+      puglGetNumClipboardTypes(state.view, PUGL_CLIPBOARD_DRAG) != 0U) {
+    return false;
+  }
+
+  const char* const type =
+    puglGetClipboardType(state.view, PUGL_CLIPBOARD_GENERAL, 0U);
+  if (!type || strcmp(type, "text/plain") ||
+      puglGetClipboardType(state.view, PUGL_CLIPBOARD_GENERAL, 1U) ||
+      puglGetClipboardType(state.view, PUGL_CLIPBOARD_DRAG, 0U)) {
+    return false;
+  }
+
+  size_t      len  = 123U;
+  const void* data =
+    puglGetClipboard(state.view, PUGL_CLIPBOARD_GENERAL, 0U, &len);
+  if (!data || len != expectedLen || memcmp(data, expected, expectedLen)) {
+    return false;
+  }
+
+  len = 123U;
+  if (puglGetClipboard(state.view, PUGL_CLIPBOARD_GENERAL, 1U, &len) || len) {
+    return false;
+  }
+
+  len = 123U;
+  return !puglGetClipboard(state.view, PUGL_CLIPBOARD_DRAG, 0U, &len) && !len;
+}
+
 static void
 restartTimer7(void* const data)
 {
@@ -184,6 +217,12 @@ main(void)
                        clipboardText,
                        sizeof(clipboardText)) != PUGL_SUCCESS) {
     fprintf(stderr, "Browser clipboard write contract is not implemented\n");
+    finish(false);
+    return 0;
+  }
+
+  if (!verifyStoredClipboard(clipboardText, sizeof(clipboardText))) {
+    fprintf(stderr, "Browser clipboard query contract is not implemented\n");
     finish(false);
     return 0;
   }
