@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
+static const char clipboardText[] = "pugl-browser-clipboard";
+
 typedef struct {
   PuglWorld* world;
   PuglView*  view;
@@ -21,8 +23,12 @@ typedef struct {
   unsigned   teardownTimerEvents;
   unsigned   timer7AtStop;
   unsigned   timer9AtStop;
+  unsigned   clipboardOffers;
+  unsigned   clipboardDataEvents;
   bool       clientOrderOk;
   bool       timer7Restarted;
+  bool       clipboardOfferOk;
+  bool       clipboardDataOk;
 } TestState;
 
 static TestState state = {0};
@@ -58,8 +64,6 @@ finish(const bool pass)
 static PuglStatus
 onEvent(PuglView* const view, const PuglEvent* const event)
 {
-  (void)view;
-
   if (event->type == PUGL_CLIENT) {
     ++state.clientEvents;
     state.clientOrderOk =
@@ -77,6 +81,33 @@ onEvent(PuglView* const view, const PuglEvent* const event)
     } else {
       state.clientOrderOk = false;
     }
+  } else if (event->type == PUGL_DATA_OFFER) {
+    ++state.clipboardOffers;
+    const char* const type =
+      puglGetClipboardType(view, PUGL_CLIPBOARD_GENERAL, 0U);
+    state.clipboardOfferOk =
+      state.clipboardOffers == 1U &&
+      event->offer.clipboard == PUGL_CLIPBOARD_GENERAL &&
+      puglGetNumClipboardTypes(view, PUGL_CLIPBOARD_GENERAL) == 1U && type &&
+      !strcmp(type, "text/plain") &&
+      !puglAcceptOffer(view,
+                       &event->offer,
+                       0U,
+                       PUGL_DATA_ACTION_COPY,
+                       0,
+                       0,
+                       64U,
+                       64U);
+  } else if (event->type == PUGL_DATA) {
+    ++state.clipboardDataEvents;
+    size_t      len  = 0U;
+    const void* data =
+      puglGetClipboard(view, PUGL_CLIPBOARD_GENERAL, 0U, &len);
+    state.clipboardDataOk =
+      state.clipboardDataEvents == 1U &&
+      event->data.clipboard == PUGL_CLIPBOARD_GENERAL &&
+      event->data.typeIndex == 0U && data && len == strlen(clipboardText) &&
+      !memcmp(data, clipboardText, len);
   }
 
   return PUGL_SUCCESS;
@@ -172,12 +203,15 @@ finishServices(void* const data)
     state.view && state.clientEvents == 1U && state.clientOrderOk &&
     state.timer7Restarted && state.timer7Events > state.timer7AtStop &&
     state.timer9AtStop >= 3U && state.timer9Events == state.timer9AtStop &&
-    state.teardownTimerEvents == 0U;
+    state.teardownTimerEvents == 0U && state.clipboardOffers == 1U &&
+    state.clipboardDataEvents == 1U && state.clipboardOfferOk &&
+    state.clipboardDataOk;
 
   if (!pass) {
     fprintf(stderr,
             "Service checks failed: client=%u order=%d timer7=%u stop7=%u "
-            "restart=%d timer9=%u stop9=%u teardown=%u\n",
+            "restart=%d timer9=%u stop9=%u teardown=%u offers=%u data=%u "
+            "offerOk=%d dataOk=%d\n",
             state.clientEvents,
             state.clientOrderOk,
             state.timer7Events,
@@ -185,7 +219,11 @@ finishServices(void* const data)
             state.timer7Restarted,
             state.timer9Events,
             state.timer9AtStop,
-            state.teardownTimerEvents);
+            state.teardownTimerEvents,
+            state.clipboardOffers,
+            state.clipboardDataEvents,
+            state.clipboardOfferOk,
+            state.clipboardDataOk);
   }
 
   finish(pass);
@@ -210,19 +248,24 @@ main(void)
     return 0;
   }
 
-  static const char clipboardText[] = "pugl-browser-clipboard";
   if (puglSetClipboard(state.view,
                        PUGL_CLIPBOARD_GENERAL,
                        "text/plain",
                        clipboardText,
-                       sizeof(clipboardText)) != PUGL_SUCCESS) {
+                       strlen(clipboardText)) != PUGL_SUCCESS) {
     fprintf(stderr, "Browser clipboard write contract is not implemented\n");
     finish(false);
     return 0;
   }
 
-  if (!verifyStoredClipboard(clipboardText, sizeof(clipboardText))) {
+  if (!verifyStoredClipboard(clipboardText, strlen(clipboardText))) {
     fprintf(stderr, "Browser clipboard query contract is not implemented\n");
+    finish(false);
+    return 0;
+  }
+
+  if (puglPaste(state.view) != PUGL_SUCCESS) {
+    fprintf(stderr, "Browser clipboard paste contract is not implemented\n");
     finish(false);
     return 0;
   }
