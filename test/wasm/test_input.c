@@ -58,10 +58,16 @@ EM_JS(int, puglInstallTestClipboard, (), {
   return clipboard.writeText === writeText && clipboard.readText === readText;
 });
 
+EM_JS(void, puglMarkTestFailure, (const char* reason), {
+  document.body.dataset.puglTest = 'fail';
+  document.body.dataset.puglReason = UTF8ToString(reason);
+});
+
 EM_JS(void, puglDispatchTestInput, (unsigned id), {
   const canvas = document.getElementById(`pugl-canvas-${id}`);
   if (!canvas) {
     document.body.dataset.puglTest = 'fail';
+    document.body.dataset.puglReason = 'missing-canvas';
     return;
   }
 
@@ -110,6 +116,7 @@ fail(TestContext* const context, const char* const what)
 {
   if (!context->failed) {
     fprintf(stderr, "WASM input test failed: %s\n", what);
+    puglMarkTestFailure(what);
   }
   context->failed = true;
 }
@@ -133,14 +140,14 @@ onEvent(PuglView* const view, const PuglEvent* const event)
   case PUGL_BUTTON_RELEASE:
     ++context->buttons;
     if (event->button.button != 1U) {
-      fail(context, "DOM secondary button was not mapped to Pugl button 1");
+      fail(context, "button-map");
     }
     break;
   case PUGL_SCROLL:
     ++context->scroll;
     if (event->scroll.direction != PUGL_SCROLL_SMOOTH ||
         event->scroll.dy <= 0.0) {
-      fail(context, "wheel delta was not translated to positive Pugl up-scroll");
+      fail(context, "wheel-map");
     }
     break;
   case PUGL_FOCUS_IN:
@@ -152,7 +159,7 @@ onEvent(PuglView* const view, const PuglEvent* const event)
   case PUGL_KEY_PRESS:
     ++context->keyPress;
     if (event->key.key != (uint32_t)'a') {
-      fail(context, "KeyA was not translated to unshifted 'a'");
+      fail(context, "key-map");
     }
     break;
   case PUGL_KEY_RELEASE:
@@ -162,7 +169,7 @@ onEvent(PuglView* const view, const PuglEvent* const event)
     ++context->text;
     if (event->text.character != (uint32_t)'a' ||
         strcmp(event->text.string, "a")) {
-      fail(context, "keypress was not translated to PUGL_TEXT");
+      fail(context, "text-map");
     }
     break;
   case PUGL_TIMER:
@@ -182,7 +189,7 @@ onEvent(PuglView* const view, const PuglEvent* const event)
                         0,
                         0U,
                         0U)) {
-      fail(context, "clipboard offer could not be accepted");
+      fail(context, "clipboard-accept");
     }
     break;
   case PUGL_DATA: {
@@ -192,7 +199,7 @@ onEvent(PuglView* const view, const PuglEvent* const event)
       view, PUGL_CLIPBOARD_GENERAL, event->data.typeIndex, &len);
     context->clipboardMatches = data && len == 5U && !memcmp(data, "hello", 5U);
     if (!context->clipboardMatches) {
-      fail(context, "clipboard data did not round-trip");
+      fail(context, "clipboard-data");
     }
     break;
   }
@@ -209,33 +216,34 @@ finish(void* const data)
   TestContext* const context = (TestContext*)data;
 
   if (puglUpdate(context->world, 0.0)) {
-    fail(context, "puglUpdate failed while polling clipboard");
+    fail(context, "clipboard-poll");
   }
 
   if (context->pointerIn < 1U || context->pointerOut < 1U ||
       context->motion < 1U || context->buttons != 2U || context->scroll < 1U) {
-    fail(context, "pointer event coverage incomplete");
+    fail(context, "pointer-coverage");
   }
   if (context->focusIn < 1U || context->focusOut < 1U) {
-    fail(context, "focus event coverage incomplete");
+    fail(context, "focus-coverage");
   }
   if (context->keyPress < 1U || context->keyRelease < 1U || context->text < 1U) {
-    fail(context, "keyboard event coverage incomplete");
+    fail(context, "keyboard-coverage");
   }
   if (context->timers < 1U) {
-    fail(context, "Pugl timer did not fire");
+    fail(context, "timer");
   }
   if (context->offers != 1U || context->dataEvents != 1U ||
       !context->clipboardMatches) {
-    fail(context, "clipboard offer/data event coverage incomplete");
+    fail(context, "clipboard-events");
   }
 
   if (puglStopTimer(context->view, 77U)) {
-    fail(context, "Pugl timer could not be stopped");
+    fail(context, "timer-stop");
   }
 
-  EM_ASM({ document.body.dataset.puglTest = $0 ? 'fail' : 'pass'; },
-         context->failed ? 1 : 0);
+  if (!context->failed) {
+    EM_ASM({ document.body.dataset.puglTest = 'pass'; });
+  }
 
   puglFreeView(context->view);
   puglFreeWorld(context->world);
@@ -248,12 +256,14 @@ main(void)
 {
   TestContext* const context = (TestContext*)calloc(1U, sizeof(TestContext));
   if (!context) {
+    puglMarkTestFailure("context-allocation");
     return 1;
   }
 
   context->world = puglNewWorld(PUGL_PROGRAM, 0U);
   context->view  = context->world ? puglNewView(context->world) : NULL;
   if (!context->world || !context->view) {
+    puglMarkTestFailure("pugl-allocation");
     return 1;
   }
 
@@ -262,12 +272,12 @@ main(void)
       puglSetEventFunc(context->view, onEvent) ||
       puglSetSizeHint(context->view, PUGL_DEFAULT_SIZE, 320U, 180U) ||
       puglShow(context->view, PUGL_SHOW_PASSIVE)) {
-    fail(context, "view setup failed");
+    fail(context, "view-setup");
     return 1;
   }
 
   if (!puglInstallTestClipboard()) {
-    fail(context, "browser clipboard shim could not be installed");
+    fail(context, "clipboard-shim");
     return 1;
   }
 
@@ -277,14 +287,14 @@ main(void)
                        "hello",
                        5U) ||
       puglPaste(context->view)) {
-    fail(context, "clipboard request setup failed");
+    fail(context, "clipboard-request");
     return 1;
   }
 
   puglDispatchTestInput((unsigned)puglGetNativeView(context->view));
 
   if (puglStartTimer(context->view, 77U, 0.005)) {
-    fail(context, "timer setup failed");
+    fail(context, "timer-setup");
     return 1;
   }
 
