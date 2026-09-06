@@ -233,6 +233,33 @@ EM_JS(void, puglBrowserUninstallDrop, (const char* selector), {
   delete element.__puglDrop;
 });
 
+EM_JS(int, puglBrowserSetCursor, (const char* selector, int cursor), {
+  const element = document.querySelector(UTF8ToString(selector));
+  if (!element) {
+    return 0;
+  }
+
+  const cursors = [
+    'default',
+    'text',
+    'crosshair',
+    'pointer',
+    'not-allowed',
+    'ew-resize',
+    'ns-resize',
+    'nwse-resize',
+    'nesw-resize',
+    'all-scroll',
+  ];
+
+  if (cursor < 0 || cursor >= cursors.length) {
+    return 0;
+  }
+
+  element.style.cursor = cursors[cursor];
+  return 1;
+});
+
 static PuglBrowserTimer*
 puglFindBrowserTimer(PuglView* const view, const uintptr_t id)
 {
@@ -1238,11 +1265,19 @@ puglSetWindowSize(PuglView* const view,
 PuglStatus
 puglSetTransientParent(PuglView* const view, const PuglNativeView parent)
 {
+  if (!view) {
+    return PUGL_BAD_PARAMETER;
+  }
+
   if (view->parent) {
     return PUGL_FAILURE;
   }
 
-  view->transientParent = parent;
+  if (parent) {
+    return PUGL_UNSUPPORTED;
+  }
+
+  view->transientParent = 0U;
   return PUGL_SUCCESS;
 }
 
@@ -1533,7 +1568,15 @@ puglGetClipboard(PuglView* const     view,
 PuglStatus
 puglSetCursor(PuglView* const view, const PuglCursor cursor)
 {
-  (void)view;
-  (void)cursor;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || (unsigned)cursor >= PUGL_NUM_CURSORS) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (!view->impl->id) {
+    return PUGL_FAILURE;
+  }
+
+  return puglBrowserSetCursor(view->impl->canvasSelector, (int)cursor)
+           ? PUGL_SUCCESS
+           : PUGL_FAILURE;
 }
