@@ -259,8 +259,66 @@ puglEmscriptenKey(const EmscriptenKeyboardEvent* const event)
   return PUGL_KEY_NONE;
 }
 
+static size_t
+puglEmscriptenCharacterLength(const char* const text)
+{
+  const unsigned char first = (unsigned char)text[0];
+  if (!first) {
+    return 0U;
+  }
+  if (first < 0x80U) {
+    return text[1] == '\0' ? 1U : 0U;
+  }
+
+  const size_t expected = (first & 0xE0U) == 0xC0U   ? 2U
+                          : (first & 0xF0U) == 0xE0U ? 3U
+                          : (first & 0xF8U) == 0xF0U ? 4U
+                                                    : 0U;
+  if (!expected || strlen(text) != expected) {
+    return 0U;
+  }
+
+  for (size_t i = 1U; i < expected; ++i) {
+    if (((unsigned char)text[i] & 0xC0U) != 0x80U) {
+      return 0U;
+    }
+  }
+
+  return expected;
+}
+
+static PuglStatus
+puglEmscriptenDispatchText(PuglView* const                       view,
+                           const EmscriptenKeyboardEvent* const browserEvent,
+                           const PuglMods                       mods)
+{
+  if (browserEvent->ctrlKey || browserEvent->altKey || browserEvent->metaKey) {
+    return PUGL_SUCCESS;
+  }
+
+  const size_t length = puglEmscriptenCharacterLength(browserEvent->key);
+  if (!length || length >= sizeof(((PuglTextEvent*)0)->string)) {
+    return PUGL_SUCCESS;
+  }
+
+  PuglEvent event      = {0};
+  event.text.type      = PUGL_TEXT;
+  event.text.time      = puglGetTime(view->world);
+  event.text.x         = view->impl->pointerX;
+  event.text.y         = view->impl->pointerY;
+  event.text.xRoot     = view->impl->pointerRootX;
+  event.text.yRoot     = view->impl->pointerRootY;
+  event.text.state     = mods;
+  event.text.keycode   = browserEvent->which ? browserEvent->which
+                                              : browserEvent->keyCode;
+  event.text.character = puglDecodeUTF8((const uint8_t*)browserEvent->key);
+  memcpy(event.text.string, browserEvent->key, length);
+  event.text.string[length] = '\0';
+  return puglDispatchEvent(view, &event);
+}
+
 static void
-puglEmscriptenRememberPointer(PuglView* const                 view,
+puglEmscriptenRememberPointer(PuglView* const                   view,
                               const EmscriptenMouseEvent* const event)
 {
   view->impl->pointerX     = event->targetX;
@@ -283,48 +341,32 @@ puglEmscriptenKeyCallback(const int                            eventType,
                                            browserEvent->shiftKey,
                                            browserEvent->altKey,
                                            browserEvent->metaKey);
-
-  if (eventType == EMSCRIPTEN_EVENT_KEYPRESS) {
-    const size_t length = strlen(browserEvent->key);
-    if (!length || length >= sizeof(((PuglTextEvent*)0)->string)) {
-      return false;
-    }
-
-    PuglEvent event       = {0};
-    event.text.type       = PUGL_TEXT;
-    event.text.time       = puglGetTime(view->world);
-    event.text.x          = view->impl->pointerX;
-    event.text.y          = view->impl->pointerY;
-    event.text.xRoot      = view->impl->pointerRootX;
-    event.text.yRoot      = view->impl->pointerRootY;
-    event.text.state      = mods;
-    event.text.keycode    = browserEvent->which ? browserEvent->which
-                                                 : browserEvent->keyCode;
-    event.text.character  = puglDecodeUTF8((const uint8_t*)browserEvent->key);
-    memcpy(event.text.string, browserEvent->key, length);
-    event.text.string[length] = '\0';
-    return puglDispatchEvent(view, &event) == PUGL_SUCCESS;
-  }
-
-  PuglEvent event     = {0};
-  event.key.type      = eventType == EMSCRIPTEN_EVENT_KEYDOWN ? PUGL_KEY_PRESS
-                                                               : PUGL_KEY_RELEASE;
-  event.key.time      = puglGetTime(view->world);
-  event.key.x         = view->impl->pointerX;
-  event.key.y         = view->impl->pointerY;
-  event.key.xRoot     = view->impl->pointerRootX;
-  event.key.yRoot     = view->impl->pointerRootY;
-  event.key.state     = puglFilterMods(mods, (PuglKey)puglEmscriptenKey(browserEvent));
-  event.key.keycode   = browserEvent->which ? browserEvent->which
-                                             : browserEvent->keyCode;
-  event.key.key       = puglEmscriptenKey(browserEvent);
+  const PuglKey key = (PuglKey)puglEmscriptenKey(browserEvent);
 
   if (eventType == EMSCRIPTEN_EVENT_KEYDOWN && browserEvent->repeat &&
       view->hints[PUGL_IGNORE_KEY_REPEAT] == PUGL_TRUE) {
     return true;
   }
 
-  return puglDispatchEvent(view, &event) == PUGL_SUCCESS;
+  PuglEvent event   = {0};
+  event.key.type    = eventType == EMSCRIPTEN_EVENT_KEYDOWN ? PUGL_KEY_PRESS
+                                                             : PUGL_KEY_RELEASE;
+  event.key.time    = puglGetTime(view->world);
+  event.key.x       = view->impl->pointerX;
+  event.key.y       = view->impl->pointerY;
+  event.key.xRoot   = view->impl->pointerRootX;
+  event.key.yRoot   = view->impl->pointerRootY;
+  event.key.state   = puglFilterMods(mods, key);
+  event.key.keycode = browserEvent->which ? browserEvent->which
+                                           : browserEvent->keyCode;
+  event.key.key     = (uint32_t)key;
+
+  const PuglStatus keyStatus = puglDispatchEvent(view, &event);
+  if (keyStatus || eventType != EMSCRIPTEN_EVENT_KEYDOWN) {
+    return keyStatus == PUGL_SUCCESS;
+  }
+
+  return puglEmscriptenDispatchText(view, browserEvent, mods) == PUGL_SUCCESS;
 }
 
 static uint32_t
@@ -456,10 +498,10 @@ puglEmscriptenFocusCallback(const int                         eventType,
     return false;
   }
 
-  PuglEvent event    = {0};
-  event.focus.type   = eventType == EMSCRIPTEN_EVENT_FOCUS ? PUGL_FOCUS_IN
-                                                            : PUGL_FOCUS_OUT;
-  event.focus.mode   = PUGL_CROSSING_NORMAL;
+  PuglEvent event  = {0};
+  event.focus.type = eventType == EMSCRIPTEN_EVENT_FOCUS ? PUGL_FOCUS_IN
+                                                          : PUGL_FOCUS_OUT;
+  event.focus.mode = PUGL_CROSSING_NORMAL;
   return puglDispatchEvent(view, &event) == PUGL_SUCCESS;
 }
 
@@ -485,8 +527,6 @@ puglEmscriptenRegisterCallbacks(PuglView* const view)
   } while (0)
 
   REGISTER(emscripten_set_keydown_callback(
-    target, view, false, puglEmscriptenKeyCallback));
-  REGISTER(emscripten_set_keypress_callback(
     target, view, false, puglEmscriptenKeyCallback));
   REGISTER(emscripten_set_keyup_callback(
     target, view, false, puglEmscriptenKeyCallback));
@@ -525,7 +565,6 @@ puglEmscriptenUnregisterCallbacks(PuglView* const view)
 
   const char* const target = view->impl->canvasSelector;
   (void)emscripten_set_keydown_callback(target, view, false, NULL);
-  (void)emscripten_set_keypress_callback(target, view, false, NULL);
   (void)emscripten_set_keyup_callback(target, view, false, NULL);
   (void)emscripten_set_mouseenter_callback(target, view, false, NULL);
   (void)emscripten_set_mouseleave_callback(target, view, false, NULL);
@@ -661,7 +700,7 @@ puglEmscriptenPollClipboard(PuglView* const view)
   }
 
   impl->clipboardOffer = true;
-  PuglEvent event      = {0};
+  PuglEvent event       = {0};
   event.offer.type      = PUGL_DATA_OFFER;
   event.offer.time      = puglGetTime(view->world);
   event.offer.x         = impl->pointerX;
@@ -702,105 +741,20 @@ puglEmscriptenAcceptOffer(PuglView* const                 view,
   (void)regionWidth;
   (void)regionHeight;
 
-  if (!view || !view->impl || !offer ||
-      offer->clipboard != PUGL_CLIPBOARD_GENERAL || !view->impl->clipboardOffer) {
-    return PUGL_BAD_PARAMETER;
-  }
-  if (typeIndex != 0U) {
+  if (!view || !view->impl || !view->impl->clipboardOffer || !offer ||
+      offer->clipboard != PUGL_CLIPBOARD_GENERAL || typeIndex != 0U) {
     return PUGL_BAD_PARAMETER;
   }
 
-  PuglEvent event      = {0};
-  event.data.type      = PUGL_DATA;
-  event.data.time      = puglGetTime(view->world);
-  event.data.x         = offer->x;
-  event.data.y         = offer->y;
-  event.data.clipboard = PUGL_CLIPBOARD_GENERAL;
-  event.data.typeIndex = 0U;
+  view->impl->clipboardOffer = false;
+  PuglEvent event       = {0};
+  event.data.type       = PUGL_DATA;
+  event.data.time       = offer->time;
+  event.data.x          = offer->x;
+  event.data.y          = offer->y;
+  event.data.clipboard  = PUGL_CLIPBOARD_GENERAL;
+  event.data.typeIndex  = typeIndex;
   return puglDispatchEvent(view, &event);
-}
-
-PuglStatus
-puglEmscriptenRejectOffer(PuglView* const                 view,
-                          const PuglDataOfferEvent* const offer,
-                          const int                       regionX,
-                          const int                       regionY,
-                          const unsigned                  regionWidth,
-                          const unsigned                  regionHeight)
-{
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-
-  if (!view || !view->impl || !offer ||
-      offer->clipboard != PUGL_CLIPBOARD_GENERAL) {
-    return PUGL_BAD_PARAMETER;
-  }
-
-  puglEmscriptenClearClipboard(view);
-  return PUGL_SUCCESS;
-}
-
-uint32_t
-puglEmscriptenGetNumClipboardTypes(const PuglView* const view,
-                                   const PuglClipboard   clipboard)
-{
-  return view && view->impl && clipboard == PUGL_CLIPBOARD_GENERAL &&
-             view->impl->clipboardOffer
-           ? 1U
-           : 0U;
-}
-
-const char*
-puglEmscriptenGetClipboardType(const PuglView* const view,
-                                const PuglClipboard   clipboard,
-                                const uint32_t        typeIndex)
-{
-  return puglEmscriptenGetNumClipboardTypes(view, clipboard) && typeIndex == 0U
-           ? "text/plain;charset=utf-8"
-           : NULL;
-}
-
-PuglStatus
-puglEmscriptenSetClipboard(PuglView* const     view,
-                           const PuglClipboard clipboard,
-                           const char* const   type,
-                           const void* const   data,
-                           const size_t        len)
-{
-  if (!view || !view->impl || !view->impl->id || !data) {
-    return PUGL_BAD_PARAMETER;
-  }
-  if (clipboard != PUGL_CLIPBOARD_GENERAL) {
-    return PUGL_UNSUPPORTED;
-  }
-  if (type && strncmp(type, "text/plain", 10U)) {
-    return PUGL_UNSUPPORTED;
-  }
-
-  return puglBrowserClipboardWrite((const char*)data, len) ? PUGL_SUCCESS
-                                                            : PUGL_UNSUPPORTED;
-}
-
-const void*
-puglEmscriptenGetClipboard(PuglView* const     view,
-                           const PuglClipboard clipboard,
-                           const uint32_t      typeIndex,
-                           size_t* const       len)
-{
-  if (len) {
-    *len = 0U;
-  }
-  if (!view || !view->impl || clipboard != PUGL_CLIPBOARD_GENERAL ||
-      typeIndex != 0U || !view->impl->clipboardOffer) {
-    return NULL;
-  }
-
-  if (len) {
-    *len = view->impl->clipboardData.len;
-  }
-  return view->impl->clipboardData.data;
 }
 
 void
@@ -810,12 +764,29 @@ puglEmscriptenClearClipboard(PuglView* const view)
     return;
   }
 
-  if (view->impl->id) {
+  if (view->impl->clipboardRequest && view->impl->id) {
     puglBrowserClipboardCancel((unsigned)view->impl->id);
   }
+  view->impl->clipboardRequest = false;
+  view->impl->clipboardOffer   = false;
   free(view->impl->clipboardData.data);
   view->impl->clipboardData.data = NULL;
   view->impl->clipboardData.len  = 0U;
-  view->impl->clipboardOffer     = false;
-  view->impl->clipboardRequest   = false;
+}
+
+PuglStatus
+puglEmscriptenSetClipboard(PuglView* const     view,
+                           const PuglClipboard clipboard,
+                           const char* const   type,
+                           const void* const   data,
+                           const size_t        len)
+{
+  if (!view || !view->impl || clipboard != PUGL_CLIPBOARD_GENERAL || !type ||
+      !data || strcmp(type, "text/plain") &&
+                 strcmp(type, "text/plain;charset=utf-8")) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  return puglBrowserClipboardWrite((const char*)data, len) ? PUGL_SUCCESS
+                                                            : PUGL_UNSUPPORTED;
 }
