@@ -801,8 +801,9 @@ puglGetNumClipboardTypes(const PuglView* const view,
                          const PuglClipboard   clipboard)
 {
   (void)view;
-  (void)clipboard;
-  return 0U;
+  return clipboard == PUGL_CLIPBOARD_GENERAL && puglBrowserClipboard.type
+           ? 1U
+           : 0U;
 }
 
 const char*
@@ -811,9 +812,9 @@ puglGetClipboardType(const PuglView* const view,
                      const uint32_t        typeIndex)
 {
   (void)view;
-  (void)clipboard;
-  (void)typeIndex;
-  return NULL;
+  return clipboard == PUGL_CLIPBOARD_GENERAL && typeIndex == 0U
+           ? puglBrowserClipboard.type
+           : NULL;
 }
 
 PuglStatus
@@ -867,12 +868,19 @@ puglGetClipboard(PuglView* const     view,
                  size_t* const       len)
 {
   (void)view;
-  (void)clipboard;
-  (void)typeIndex;
   if (len) {
     *len = 0U;
   }
-  return NULL;
+
+  if (clipboard != PUGL_CLIPBOARD_GENERAL || typeIndex != 0U ||
+      !puglBrowserClipboard.data) {
+    return NULL;
+  }
+
+  if (len) {
+    *len = puglBrowserClipboard.len;
+  }
+  return puglBrowserClipboard.data;
 }
 
 PuglStatus
