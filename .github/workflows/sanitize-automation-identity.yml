@@ -2,8 +2,6 @@ name: Sanitize automation commit identity
 
 on:
   push:
-    branches:
-      - main
   pull_request_target:
     types: [opened, synchronize, reopened]
 
@@ -32,6 +30,7 @@ jobs:
           FILTER_BRANCH_SQUELCH_WARNING: '1'
           EVENT_NAME: ${{ github.event_name }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PUSH_REF: ${{ github.ref_name }}
           OWNER_LOGIN: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
@@ -95,5 +94,5 @@ jobs:
           if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
             sanitize_ref "$PR_HEAD_REF"
           else
-            sanitize_ref main
+            sanitize_ref "$PUSH_REF"
           fi
