@@ -1,0 +1,92 @@
+name: Apply browser semantics test event fix
+
+on:
+  push:
+    branches: [feature/emscripten-browser-semantics]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-browser-semantics-test-event-fix
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/emscripten-browser-semantics
+          fetch-depth: 0
+
+      - name: Give browser semantics test views valid event callbacks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/emscripten-browser-semantics
+          git checkout -B feature/emscripten-browser-semantics origin/feature/emscripten-browser-semantics
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('test/wasm/test_browser_semantics.c')
+          text = path.read_text()
+
+          marker = """EM_JS(void, puglTestDestroyHost, (uintptr_t nativeView), {\n  const host = document.querySelector(\n    `[data-pugl-native-view=\\\"${nativeView}\\\"]`);\n  if (host) {\n    host.remove();\n  }\n});\n\n"""
+          helper = """static PuglStatus\npuglTestIgnoreEvent(PuglView* const view, const PuglEvent* const event)\n{\n  (void)view;\n  (void)event;\n  return PUGL_SUCCESS;\n}\n\n"""
+          if helper not in text:
+              if marker not in text:
+                  raise SystemExit('test helper insertion point not found')
+              text = text.replace(marker, marker + helper, 1)
+
+          replacements = [
+              (
+                  "  puglSetBackend(view, puglStubBackend());\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);",
+                  "  puglSetBackend(view, puglStubBackend());\n  puglSetEventFunc(view, puglTestIgnoreEvent);\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);",
+                  2,
+              ),
+              (
+                  "  puglSetBackend(view0, puglStubBackend());\n  puglSetBackend(view1, puglStubBackend());\n  puglSetSizeHint(view0, PUGL_DEFAULT_SIZE, 16U, 16U);",
+                  "  puglSetBackend(view0, puglStubBackend());\n  puglSetBackend(view1, puglStubBackend());\n  puglSetEventFunc(view0, puglTestIgnoreEvent);\n  puglSetEventFunc(view1, puglTestIgnoreEvent);\n  puglSetSizeHint(view0, PUGL_DEFAULT_SIZE, 16U, 16U);",
+                  1,
+              ),
+              (
+                  "  puglSetBackend(view, puglStubBackend());\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 48U, 24U);",
+                  "  puglSetBackend(view, puglStubBackend());\n  puglSetEventFunc(view, puglTestIgnoreEvent);\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 48U, 24U);",
+                  1,
+              ),
+              (
+                  "    puglSetBackend(missingView, puglStubBackend());\n    puglSetSizeHint(missingView, PUGL_DEFAULT_SIZE, 16U, 16U);",
+                  "    puglSetBackend(missingView, puglStubBackend());\n    puglSetEventFunc(missingView, puglTestIgnoreEvent);\n    puglSetSizeHint(missingView, PUGL_DEFAULT_SIZE, 16U, 16U);",
+                  1,
+              ),
+          ]
+
+          for old, new, expected in replacements:
+              count = text.count(old)
+              if count:
+                  if count != expected:
+                      raise SystemExit(f'unexpected match count {count} for {old[:60]!r}, expected {expected}')
+                  text = text.replace(old, new)
+              elif new not in text:
+                  raise SystemExit(f'expected test fragment not found: {old[:80]!r}')
+
+          path.write_text(text)
+          PY
+
+          git rm .github/workflows/apply-browser-test-event-fix.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add test/wasm/test_browser_semantics.c
+          git commit -m 'Fix browser semantics test view setup'
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:feature/emscripten-browser-semantics; then
+              exit 0
+            fi
+            git fetch origin feature/emscripten-browser-semantics
+            git rebase origin/feature/emscripten-browser-semantics
+          done
+          exit 1
