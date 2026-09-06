@@ -21,6 +21,60 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct PuglBrowserTimerImpl PuglBrowserTimer;
+
+struct PuglBrowserTimerImpl {
+  PuglBrowserTimer* next;
+  PuglView*         view;
+  uintptr_t         id;
+  long              intervalId;
+};
+
+static PuglBrowserTimer* puglBrowserTimers = NULL;
+
+static PuglBrowserTimer*
+puglFindBrowserTimer(PuglView* const view, const uintptr_t id)
+{
+  for (PuglBrowserTimer* timer = puglBrowserTimers; timer; timer = timer->next) {
+    if (timer->view == view && timer->id == id) {
+      return timer;
+    }
+  }
+
+  return NULL;
+}
+
+static void
+puglBrowserTimerCallback(void* const data)
+{
+  PuglBrowserTimer* const timer = (PuglBrowserTimer*)data;
+  PuglView* const         view  = timer ? timer->view : NULL;
+  if (!view || !view->impl || !view->impl->id) {
+    return;
+  }
+
+  PuglEvent event  = {0};
+  event.timer.type = PUGL_TIMER;
+  event.timer.id   = timer->id;
+  (void)puglDispatchEvent(view, &event);
+}
+
+static void
+puglClearBrowserTimers(PuglView* const view)
+{
+  PuglBrowserTimer** link = &puglBrowserTimers;
+  while (*link) {
+    PuglBrowserTimer* const timer = *link;
+    if (timer->view == view) {
+      *link = timer->next;
+      emscripten_clear_interval(timer->intervalId);
+      free(timer);
+    } else {
+      link = &timer->next;
+    }
+  }
+}
+
 static PuglCoord
 puglClampCoord(const int value)
 {
@@ -222,6 +276,7 @@ puglFreeViewInternals(PuglView* const view)
       (void)puglUnrealize(view);
     }
 
+    puglClearBrowserTimers(view);
     puglEmscriptenFreeInput(view);
     free(view->impl);
   }
@@ -310,6 +365,7 @@ puglUnrealize(PuglView* const view)
 
   const uintptr_t id = impl->id;
   const PuglStatus st = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
+  puglClearBrowserTimers(view);
   puglEmscriptenUnregisterInput(view);
   view->backend->destroy(view);
   puglDestroyDomView(id);
@@ -400,18 +456,63 @@ puglHasFocus(const PuglView* const view)
 PuglStatus
 puglStartTimer(PuglView* const view, const uintptr_t id, const double timeout)
 {
-  (void)view;
-  (void)id;
-  (void)timeout;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || !view->impl->id || timeout <= 0.0) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglBrowserTimer* timer = puglFindBrowserTimer(view, id);
+  if (timer) {
+    emscripten_clear_interval(timer->intervalId);
+  } else {
+    timer = (PuglBrowserTimer*)calloc(1U, sizeof(PuglBrowserTimer));
+    if (!timer) {
+      return PUGL_NO_MEMORY;
+    }
+
+    timer->next = puglBrowserTimers;
+    timer->view = view;
+    timer->id   = id;
+    puglBrowserTimers = timer;
+  }
+
+  const long intervalId =
+    emscripten_set_interval(puglBrowserTimerCallback, timeout * 1000.0, timer);
+  if (intervalId <= 0) {
+    PuglBrowserTimer** link = &puglBrowserTimers;
+    while (*link && *link != timer) {
+      link = &(*link)->next;
+    }
+    if (*link == timer) {
+      *link = timer->next;
+    }
+    free(timer);
+    return PUGL_UNKNOWN_ERROR;
+  }
+
+  timer->intervalId = intervalId;
+  return PUGL_SUCCESS;
 }
 
 PuglStatus
 puglStopTimer(PuglView* const view, const uintptr_t id)
 {
-  (void)view;
-  (void)id;
-  return PUGL_UNSUPPORTED;
+  if (!view) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglBrowserTimer** link = &puglBrowserTimers;
+  while (*link) {
+    PuglBrowserTimer* const timer = *link;
+    if (timer->view == view && timer->id == id) {
+      *link = timer->next;
+      emscripten_clear_interval(timer->intervalId);
+      free(timer);
+      return PUGL_SUCCESS;
+    }
+    link = &timer->next;
+  }
+
+  return PUGL_FAILURE;
 }
 
 PuglStatus
