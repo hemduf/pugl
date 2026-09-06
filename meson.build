@@ -255,6 +255,20 @@ elif host_machine.system() == 'windows'
   backend_extension = '.c'
   soversion = ''  # Avoid redundant version in DLL name
 
+elif host_machine.system() == 'emscripten'
+  # WebAssembly via Emscripten
+
+  if get_option('default_library') != 'static'
+    error('Emscripten builds require default_library=static')
+  endif
+
+  platform = 'emscripten'
+  platform_sources = files('src/emscripten.c')
+  platform_args = []
+  core_deps = []
+  backend_extension = '.c'
+  soversion = ''
+
 else
   # X11
   x11_dep = cc.find_library('X11')
@@ -403,11 +417,15 @@ endif
 
 # OpenGL Backend #
 
-opengl_dep = dependency(
-  'GL',
-  include_type: 'system',
-  required: get_option('opengl'),
-)
+if platform == 'emscripten'
+  opengl_dep = dependency('', required: false)
+else
+  opengl_dep = dependency(
+    'GL',
+    include_type: 'system',
+    required: get_option('opengl'),
+  )
+endif
 if opengl_dep.found()
   gl_backend = library(
     'pugl_@0@_gl@1@'.format(platform, version_suffix),
@@ -447,11 +465,15 @@ endif
 
 # Cairo Backend #
 
-cairo_dep = dependency(
-  'cairo',
-  include_type: 'system',
-  required: get_option('cairo'),
-)
+if platform == 'emscripten'
+  cairo_dep = dependency('', required: false)
+else
+  cairo_dep = dependency(
+    'cairo',
+    include_type: 'system',
+    required: get_option('cairo'),
+  )
+endif
 if cairo_dep.found()
   cairo_args = []
   if cc.get_id() == 'clang'
@@ -511,11 +533,15 @@ if cairo_dep.found()
 endif
 
 # Vulkan
-vulkan_dep = dependency(
-  'vulkan',
-  include_type: 'system',
-  required: get_option('vulkan'),
-)
+if platform == 'emscripten'
+  vulkan_dep = dependency('', required: false)
+else
+  vulkan_dep = dependency(
+    'vulkan',
+    include_type: 'system',
+    required: get_option('vulkan'),
+  )
+endif
 if vulkan_dep.found()
   thread_dep = dependency('threads', include_type: 'system')
 
