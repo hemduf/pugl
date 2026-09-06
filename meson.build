@@ -100,19 +100,19 @@ elif cc.get_id() == 'msvc'
 
   if warning_level == 'everything'
     c_suppressions += [
-      '/wd4061',  # enumerator in switch is not explicitly handled
-      '/wd4191',  # unsafe conversion from type to type
-      '/wd4514',  # unreferenced inline function has been removed
-      '/wd4710',  # function not inlined
-      '/wd4711',  # function selected for automatic inline expansion
-      '/wd4820',  # padding added after construct
-      '/wd5045',  # will insert Spectre mitigation for memory load
+      '/wd4061',
+      '/wd4191',
+      '/wd4514',
+      '/wd4710',
+      '/wd4711',
+      '/wd4820',
+      '/wd5045',
     ]
   endif
 
   if warning_level in ['everything', '3']
     c_suppressions += [
-      '/wd4100',  # unreferenced formal parameter
+      '/wd4100',
     ]
   endif
 endif
@@ -183,59 +183,37 @@ elif host_machine.system() == 'windows'
   endif
 
   platform_args = [
-    # Set minimum target version
-    '-DWINVER=0x0500',  # Windows 2000
-    '-D_WIN32_WINNT=0x0500',  # Windows 2000
-
-    # Disable as many things from windows.h as possible
+    '-DWINVER=0x0500',
+    '-D_WIN32_WINNT=0x0500',
     '-DWIN32_LEAN_AND_MEAN',
-    '-DNOGDICAPMASKS',  # CC_*, LC_*, PC_*, CP_*, TC_*, RC_
-    '-DNOSYSMETRICS',  # SM_*
-    '-DNOKEYSTATES',  # MK_*
-    '-DOEMRESOURCE',  # OEM Resource values
-    '-DNOATOM',  # Atom Manager routines
-    '-DNOCOLOR',  # Screen colors
-    '-DNODRAWTEXT',  # DrawText() and DT_*
-    '-DNOKERNEL',  # All KERNEL defines and routines
-    '-DNOMB',  # MB_* and MessageBox()
-    '-DNOMEMMGR',  # GMEM_*, LMEM_*, GHND, LHND, associated routines
-    '-DNOMETAFILE',  # typedef METAFILEPICT
-    '-DNOMINMAX',  # Macros min(a,b) and max(a,b)
-    '-DNOOPENFILE',  # OpenFile(), OemToAnsi, AnsiToOem, and OF_*
-    '-DNOSCROLL',  # SB_* and scrolling routines
-    '-DNOSERVICE',  # All Service Controller routines, SERVICE_ equates, etc.
-    '-DNOSOUND',  # Sound driver routines
-    '-DNOWH',  # SetWindowsHook and WH_*
-    '-DNOCOMM',  # COMM driver routines
-    '-DNOKANJI',  # Kanji support stuff
-    '-DNOHELP',  # Help engine interface
-    '-DNOPROFILER',  # Profiler interface
-    '-DNODEFERWINDOWPOS',  # DeferWindowPos routines
-    '-DNOMCX',  # Modem Configuration Extensions
-
-    # Needed only for Cairo
-    # '-DNORASTEROPS', # Binary and Tertiary raster ops
-
-    # Needed by Pugl
-    # '-DNOVIRTUALKEYCODES', # VK_*
-    # '-DNOWINMESSAGES', # WM_*, EM_*, LB_*, CB_*
-    # '-DNOWINSTYLES', # WS_*, CS_*, ES_*, LBS_*, SBS_*, CBS_*
-    # '-DNOMENUS', # MF_*
-    # '-DNOICONS', # IDI_*
-    # '-DNOSYSCOMMANDS', # SC_*
-    # '-DNOSHOWWINDOW', # SW_*
-    # '-DNOCLIPBOARD', # Clipboard routines
-    # '-DNOCTLMGR', # Control and Dialog routines
-    # '-DNOGDI', # All GDI defines and routines
-    # '-DNOUSER', # All USER defines and routines
-    # '-DNONLS', # All NLS defines and routines
-    # '-DNOMSG', # typedef MSG and associated routines
-    # '-DNOWINOFFSETS', # GWL_*, GCL_*, associated routines
+    '-DNOGDICAPMASKS',
+    '-DNOSYSMETRICS',
+    '-DNOKEYSTATES',
+    '-DOEMRESOURCE',
+    '-DNOATOM',
+    '-DNOCOLOR',
+    '-DNODRAWTEXT',
+    '-DNOKERNEL',
+    '-DNOMB',
+    '-DNOMEMMGR',
+    '-DNOMETAFILE',
+    '-DNOMINMAX',
+    '-DNOOPENFILE',
+    '-DNOSCROLL',
+    '-DNOSERVICE',
+    '-DNOSOUND',
+    '-DNOWH',
+    '-DNOCOMM',
+    '-DNOKANJI',
+    '-DNOHELP',
+    '-DNOPROFILER',
+    '-DNODEFERWINDOWPOS',
+    '-DNOMCX',
   ]
 
   if cc.get_id() == 'msvc'
     platform_args += [
-      '-DNOTEXTMETRIC',  # typedef TEXTMETRIC and associated routines
+      '-DNOTEXTMETRIC',
     ]
   endif
 
@@ -253,7 +231,21 @@ elif host_machine.system() == 'windows'
   platform_sources = files('src/win.c')
   core_deps = [dwmapi_dep, gdi32_dep, shell32_dep, shlwapi_dep, user32_dep]
   backend_extension = '.c'
-  soversion = ''  # Avoid redundant version in DLL name
+  soversion = ''
+
+elif host_machine.system() == 'emscripten'
+  # WebAssembly via Emscripten
+
+  if get_option('default_library') != 'static'
+    error('Emscripten builds require default_library=static')
+  endif
+
+  platform = 'emscripten'
+  platform_sources = files('src/emscripten.c')
+  platform_args = []
+  core_deps = []
+  backend_extension = '.c'
+  soversion = ''
 
 else
   # X11
@@ -282,7 +274,7 @@ else
   x11_suppressions = []
   if cc.get_id() == 'clang'
     x11_suppressions += [
-      '-Wno-reserved-identifier',  # FD_ZERO
+      '-Wno-reserved-identifier',
     ]
   endif
 
@@ -301,7 +293,6 @@ endif
 core_name = 'pugl_@0@@1@'.format(platform, version_suffix)
 includes = include_directories(['include'])
 
-# Determine if project should be installed
 default_library = get_option('default_library')
 install = (
   get_option('install').enabled()
@@ -311,13 +302,11 @@ install = (
   )
 )
 
-# "Usage" arguments for libraries and their dependants
 usage_args = []
 if default_library == 'static'
   usage_args += ['-DPUGL_STATIC']
 endif
 
-# Arguments used when building libraries
 library_args = usage_args + platform_args
 library_args += ['-DPUGL_INTERNAL']
 
@@ -362,8 +351,7 @@ meson.override_dependency(versioned_name, pugl_dep)
 # Backends #
 ############
 
-# Stub Backend #
-
+# Stub Backend
 if get_option('stub')
   stub_backend = library(
     'pugl_@0@_stub@1@'.format(platform, version_suffix),
@@ -401,13 +389,17 @@ if get_option('stub')
   endif
 endif
 
-# OpenGL Backend #
+# OpenGL Backend
+if platform == 'emscripten'
+  opengl_dep = dependency('', required: false)
+else
+  opengl_dep = dependency(
+    'GL',
+    include_type: 'system',
+    required: get_option('opengl'),
+  )
+endif
 
-opengl_dep = dependency(
-  'GL',
-  include_type: 'system',
-  required: get_option('opengl'),
-)
 if opengl_dep.found()
   gl_backend = library(
     'pugl_@0@_gl@1@'.format(platform, version_suffix),
@@ -445,13 +437,17 @@ if opengl_dep.found()
   endif
 endif
 
-# Cairo Backend #
+# Cairo Backend
+if platform == 'emscripten'
+  cairo_dep = dependency('', required: false)
+else
+  cairo_dep = dependency(
+    'cairo',
+    include_type: 'system',
+    required: get_option('cairo'),
+  )
+endif
 
-cairo_dep = dependency(
-  'cairo',
-  include_type: 'system',
-  required: get_option('cairo'),
-)
 if cairo_dep.found()
   cairo_args = []
   if cc.get_id() == 'clang'
@@ -511,11 +507,16 @@ if cairo_dep.found()
 endif
 
 # Vulkan
-vulkan_dep = dependency(
-  'vulkan',
-  include_type: 'system',
-  required: get_option('vulkan'),
-)
+if platform == 'emscripten'
+  vulkan_dep = dependency('', required: false)
+else
+  vulkan_dep = dependency(
+    'vulkan',
+    include_type: 'system',
+    required: get_option('vulkan'),
+  )
+endif
+
 if vulkan_dep.found()
   thread_dep = dependency('threads', include_type: 'system')
 
