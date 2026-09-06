@@ -68,7 +68,19 @@ setBrowserReady(void)
 static int
 fail(const char* const expression, const int line)
 {
-  fprintf(stderr, "Input check failed at line %d: %s\n", line, expression);
+  fprintf(stderr,
+          "Input check failed at line %d: %s "
+          "[text=%u composition=%u focusIn=%u focusOut=%u "
+          "keyPress=%u keyRelease=%u configure=%u]\n",
+          line,
+          expression,
+          state.text,
+          state.compositionText,
+          state.focusIn,
+          state.focusOut,
+          state.keyPress,
+          state.keyRelease,
+          state.configure);
   setBrowserResult(false);
   return 1;
 }
@@ -160,11 +172,18 @@ dispatchInput(const PuglNativeView currentNativeView)
     "keyCode:37,which:37,shiftKey:true,ctrlKey:true,bubbles:true}));"
     "input.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',code:'ArrowLeft',"
     "keyCode:37,which:37,shiftKey:true,ctrlKey:true,bubbles:true}));"
+    "input.dispatchEvent(new CompositionEvent('compositionstart',{data:'',bubbles:true}));"
     "input.dispatchEvent(new InputEvent('beforeinput',{data:'漢',"
     "inputType:'insertCompositionText',isComposing:true,bubbles:true,cancelable:true}));"
+    "input.value='漢';"
+    "input.dispatchEvent(new InputEvent('input',{data:'漢',"
+    "inputType:'insertCompositionText',isComposing:true,bubbles:true}));"
     "input.dispatchEvent(new CompositionEvent('compositionend',{data:'漢',bubbles:true}));"
     "input.dispatchEvent(new InputEvent('beforeinput',{data:'漢',"
     "inputType:'insertFromComposition',bubbles:true,cancelable:true}));"
+    "input.value='漢';"
+    "input.dispatchEvent(new InputEvent('input',{data:'漢',"
+    "inputType:'insertFromComposition',bubbles:true}));"
     "const r=e.getBoundingClientRect();"
     "const p=(type,button=0)=>new PointerEvent(type,{pointerId:7,pointerType:'pen',"
     "clientX:r.left+25,clientY:r.top+30,screenX:125,screenY:130,button,buttons:1,"
