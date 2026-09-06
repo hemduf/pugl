@@ -138,3 +138,11 @@ endif
 ###################
 
 subdir('headers')
+
+########################
+# WebAssembly Harness  #
+########################
+
+if platform == 'emscripten'
+  subdir('wasm')
+endif
