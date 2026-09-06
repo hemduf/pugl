@@ -724,6 +724,39 @@ puglSetDomGeometry(const PuglView* const view,
   emscripten_run_script(script);
 }
 
+static bool
+puglSetDomSizeConstraint(const PuglView* const view,
+                         const PuglSizeHint    hint,
+                         const PuglArea        area)
+{
+  const char* const prefix = hint == PUGL_MIN_SIZE ? "min" : "max";
+  char              script[512] = {0};
+
+  if (puglIsValidArea(area)) {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.%sWidth='%upx';"
+             "e.style.%sHeight='%upx';return 1;})()",
+             view->impl->id,
+             prefix,
+             area.width,
+             prefix,
+             area.height);
+  } else {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.%sWidth='';"
+             "e.style.%sHeight='';return 1;})()",
+             view->impl->id,
+             prefix,
+             prefix);
+  }
+
+  return emscripten_run_script_int(script) != 0;
+}
+
 static int
 puglGetBrowserDimension(const char* const name)
 {
@@ -854,9 +887,21 @@ puglGetAncestorCenter(const PuglView* const view)
 PuglStatus
 puglApplySizeHint(PuglView* const view, const PuglSizeHint hint)
 {
-  (void)view;
-  (void)hint;
-  return PUGL_SUCCESS;
+  if (!view || !view->impl) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE) {
+    return PUGL_SUCCESS;
+  }
+
+  if (!view->impl->id) {
+    return PUGL_SUCCESS;
+  }
+
+  return puglSetDomSizeConstraint(view, hint, view->sizeHints[hint])
+           ? PUGL_SUCCESS
+           : PUGL_FAILURE;
 }
 
 PuglStatus
@@ -892,6 +937,13 @@ puglRealize(PuglView* const view)
   if (!puglCreateDomView(view, pos, size)) {
     impl->id = 0U;
     return PUGL_REALIZE_FAILED;
+  }
+
+  if ((st = puglApplySizeHint(view, PUGL_MIN_SIZE)) ||
+      (st = puglApplySizeHint(view, PUGL_MAX_SIZE))) {
+    puglDestroyDomView(impl->id);
+    impl->id = 0U;
+    return st;
   }
 
   if ((st = view->backend->create(view))) {
