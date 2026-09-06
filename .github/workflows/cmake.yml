@@ -1,0 +1,65 @@
+# Copyright 2026 Fabrizio Duhem
+# SPDX-License-Identifier: 0BSD OR ISC
+
+name: CMake
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxrandr-dev \
+            ninja-build
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DPUGL_BUILD_CAIRO=OFF
+          -DPUGL_BUILD_VULKAN=OFF
+          -DPUGL_BUILD_TESTS=ON
+          -DPUGL_INSTALL=ON
+
+      - name: Build
+        run: cmake --build build --verbose
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install
+        run: cmake --install build --prefix "${{ github.workspace }}/install"
+
+      - name: Configure installed-package consumer
+        run: >-
+          cmake -S test/cmake/consumer -B consumer -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install"
+
+      - name: Build installed-package consumer
+        run: cmake --build consumer --verbose
