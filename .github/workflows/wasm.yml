@@ -53,15 +53,19 @@ jobs:
 
           for test_name in pugl_wasm_lifecycle pugl_wasm_input; do
             dom="/tmp/${test_name}.html"
+            log="/tmp/${test_name}.chrome.log"
             "$chrome" \
               --headless=new \
               --no-sandbox \
               --disable-gpu \
+              --enable-logging=stderr \
+              --v=1 \
               --virtual-time-budget=5000 \
               --dump-dom \
               "http://127.0.0.1:8123/${test_name}.html" \
-              > "$dom"
+              > "$dom" 2> "$log" || true
 
+            cat "$log"
             cat "$dom"
             grep -q 'data-pugl-test="pass"' "$dom"
           done
