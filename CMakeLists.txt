@@ -53,7 +53,10 @@ set(pugl_soversion "${PROJECT_VERSION_MAJOR}")
 
 if(EMSCRIPTEN)
   set(pugl_platform "emscripten")
-  set(pugl_platform_sources src/emscripten.c)
+  set(pugl_platform_sources
+    src/emscripten.c
+    src/emscripten_events.c
+  )
   set(pugl_soversion "")
 elseif(APPLE)
   enable_language(OBJC)
