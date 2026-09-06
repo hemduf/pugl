@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,6 +31,8 @@ struct PuglBrowserBindingImpl {
 static PuglBrowserBinding* puglBrowserBindings = NULL;
 static uintptr_t           puglNextBrowserToken = 1U;
 
+#define PUGL_BROWSER_INPUT_SELECTOR_SIZE 64U
+
 #if defined(__GNUC__)
 #  define PUGL_BROWSER_EXPORT __attribute__((visibility("default")))
 #else
@@ -41,6 +44,39 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
   if (!element || element.__puglInput) {
     return 0;
   }
+
+  const inputId = `${element.id}-input`;
+  if (document.getElementById(inputId)) {
+    return 0;
+  }
+
+  const input = document.createElement('textarea');
+  input.id = inputId;
+  input.dataset.puglTextInput = String(token);
+  input.tabIndex = -1;
+  input.autocomplete = 'off';
+  input.autocapitalize = 'off';
+  input.spellcheck = false;
+  input.wrap = 'off';
+  input.rows = 1;
+  input.style.position = 'fixed';
+  input.style.left = '0';
+  input.style.top = '0';
+  input.style.width = '1px';
+  input.style.height = '1px';
+  input.style.margin = '0';
+  input.style.padding = '0';
+  input.style.border = '0';
+  input.style.opacity = '0';
+  input.style.pointerEvents = 'none';
+  input.style.transform = 'translate(-10000px, -10000px)';
+  input.style.zIndex = '-1';
+
+  const parent = element.parentNode || document.body;
+  if (!parent) {
+    return 0;
+  }
+  parent.insertBefore(input, element.nextSibling);
 
   const exported = (name) => Module[name];
   const modifiers = (event) => {
@@ -65,24 +101,63 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
             event.clientY];
   };
 
-  const handlers = {lockMods: 0};
+  const focusInput = () => {
+    try {
+      input.focus({preventScroll: true});
+    } catch (_) {
+      input.focus();
+    }
+    return document.activeElement === input;
+  };
+
+  const handlers = {
+    textInput: input,
+    mods: 0,
+    lockMods: 0,
+  };
+
   handlers.keyMods = (event) => {
-    handlers.lockMods = modifiers(event) & (16 | 32 | 64);
+    const mask = modifiers(event);
+    handlers.mods = mask & (1 | 2 | 4 | 8);
+    handlers.lockMods = mask & (16 | 32 | 64);
+  };
+
+  const emitText = (data) => {
+    const callback = exported('_puglEmscriptenTextEvent');
+    if (typeof callback !== 'function' || !data) {
+      return;
+    }
+
+    const state = handlers.mods | handlers.lockMods;
+    for (const character of String(data)) {
+      callback(token, character.codePointAt(0), state);
+    }
   };
 
   handlers.text = (event) => {
-    if (!event.data) {
-      return;
+    if (event.cancelable) {
+      event.preventDefault();
     }
 
-    const callback = exported('_puglEmscriptenTextEvent');
-    if (typeof callback !== 'function') {
-      return;
+    const compositionInput =
+      event.isComposing ||
+      event.inputType === 'insertCompositionText' ||
+      event.inputType === 'insertFromComposition';
+    if (!compositionInput && event.data) {
+      emitText(event.data);
     }
+    input.value = '';
+  };
 
-    for (const character of String(event.data)) {
-      callback(token, character.codePointAt(0), modifiers(event));
+  handlers.inputEvent = () => {
+    input.value = '';
+  };
+
+  handlers.compositionEnd = (event) => {
+    if (event.data) {
+      emitText(event.data);
     }
+    input.value = '';
   };
 
   const pointer = (kind) => (event) => {
@@ -106,11 +181,7 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
   handlers.pointerLeave = pointer(2);
   handlers.pointerMove = pointer(3);
   handlers.pointerDown = (event) => {
-    try {
-      element.focus({preventScroll: true});
-    } catch (_) {
-      element.focus();
-    }
+    focusInput();
 
     if (typeof element.setPointerCapture === 'function') {
       try {
@@ -174,9 +245,16 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
     callback(token, width, height, ratio);
   };
 
-  element.addEventListener('keydown', handlers.keyMods, true);
-  element.addEventListener('keyup', handlers.keyMods, true);
-  element.addEventListener('beforeinput', handlers.text, false);
+  handlers.canvasFocus = () => {
+    focusInput();
+  };
+
+  input.addEventListener('keydown', handlers.keyMods, true);
+  input.addEventListener('keyup', handlers.keyMods, true);
+  input.addEventListener('beforeinput', handlers.text, false);
+  input.addEventListener('input', handlers.inputEvent, false);
+  input.addEventListener('compositionend', handlers.compositionEnd, false);
+  element.addEventListener('focus', handlers.canvasFocus, false);
   element.addEventListener('pointerenter', handlers.pointerEnter, false);
   element.addEventListener('pointerleave', handlers.pointerLeave, false);
   element.addEventListener('pointermove', handlers.pointerMove, false);
@@ -202,9 +280,16 @@ EM_JS(void, puglBrowserUninstallInput, (const char* selector), {
     return;
   }
 
-  element.removeEventListener('keydown', handlers.keyMods, true);
-  element.removeEventListener('keyup', handlers.keyMods, true);
-  element.removeEventListener('beforeinput', handlers.text, false);
+  const input = handlers.textInput;
+  if (input) {
+    input.removeEventListener('keydown', handlers.keyMods, true);
+    input.removeEventListener('keyup', handlers.keyMods, true);
+    input.removeEventListener('beforeinput', handlers.text, false);
+    input.removeEventListener('input', handlers.inputEvent, false);
+    input.removeEventListener('compositionend', handlers.compositionEnd, false);
+  }
+
+  element.removeEventListener('focus', handlers.canvasFocus, false);
   element.removeEventListener('pointerenter', handlers.pointerEnter, false);
   element.removeEventListener('pointerleave', handlers.pointerLeave, false);
   element.removeEventListener('pointermove', handlers.pointerMove, false);
@@ -217,6 +302,9 @@ EM_JS(void, puglBrowserUninstallInput, (const char* selector), {
     handlers.observer.disconnect();
   }
 
+  if (input) {
+    input.remove();
+  }
   delete element.__puglInput;
 });
 
@@ -227,21 +315,27 @@ EM_JS(unsigned, puglBrowserLockModifiers, (const char* selector), {
 
 EM_JS(int, puglBrowserFocus, (const char* selector), {
   const element = document.querySelector(UTF8ToString(selector));
-  if (!element) {
+  const input = element && element.__puglInput
+                  ? element.__puglInput.textInput
+                  : null;
+  if (!input) {
     return 0;
   }
 
   try {
-    element.focus({preventScroll: true});
+    input.focus({preventScroll: true});
   } catch (_) {
-    element.focus();
+    input.focus();
   }
-  return document.activeElement === element;
+  return document.activeElement === input;
 });
 
 EM_JS(int, puglBrowserHasFocus, (const char* selector), {
   const element = document.querySelector(UTF8ToString(selector));
-  return !!element && document.activeElement === element;
+  const input = element && element.__puglInput
+                  ? element.__puglInput.textInput
+                  : null;
+  return !!input && document.activeElement === input;
 });
 
 static PuglBrowserBinding*
@@ -280,6 +374,21 @@ puglBrowserMods(const unsigned mask)
          ((mask & 16U) ? PUGL_MOD_NUM_LOCK : 0U) |
          ((mask & 32U) ? PUGL_MOD_SCROLL_LOCK : 0U) |
          ((mask & 64U) ? PUGL_MOD_CAPS_LOCK : 0U);
+}
+
+static bool
+puglInputSelector(const PuglView* const view,
+                  char selector[PUGL_BROWSER_INPUT_SELECTOR_SIZE])
+{
+  if (!view || !view->impl || !view->impl->canvasSelector[0]) {
+    return false;
+  }
+
+  const int length = snprintf(selector,
+                              PUGL_BROWSER_INPUT_SELECTOR_SIZE,
+                              "%s-input",
+                              view->impl->canvasSelector);
+  return length > 0 && (size_t)length < PUGL_BROWSER_INPUT_SELECTOR_SIZE;
 }
 
 static uint32_t
@@ -407,8 +516,60 @@ puglSpecialKey(const EmscriptenKeyboardEvent* const event)
 }
 
 static uint32_t
+puglSingleUtf8CodePoint(const char* const string)
+{
+  const size_t length = strlen(string);
+  if (!length || length > 4U) {
+    return PUGL_KEY_NONE;
+  }
+
+  const unsigned char* const s = (const unsigned char*)string;
+  if (length == 1U) {
+    return s[0] < 0x80U ? (uint32_t)s[0] : PUGL_KEY_NONE;
+  }
+
+  uint32_t character = 0U;
+  if (length == 2U && (s[0] & 0xE0U) == 0xC0U) {
+    character = (uint32_t)(s[0] & 0x1FU);
+  } else if (length == 3U && (s[0] & 0xF0U) == 0xE0U) {
+    character = (uint32_t)(s[0] & 0x0FU);
+  } else if (length == 4U && (s[0] & 0xF8U) == 0xF0U) {
+    character = (uint32_t)(s[0] & 0x07U);
+  } else {
+    return PUGL_KEY_NONE;
+  }
+
+  for (size_t i = 1U; i < length; ++i) {
+    if ((s[i] & 0xC0U) != 0x80U) {
+      return PUGL_KEY_NONE;
+    }
+    character = (character << 6U) | (uint32_t)(s[i] & 0x3FU);
+  }
+
+  if ((length == 2U && character < 0x80U) ||
+      (length == 3U && character < 0x800U) ||
+      (length == 4U && character < 0x10000U) ||
+      character > 0x10FFFFU ||
+      (character >= 0xD800U && character <= 0xDFFFU)) {
+    return PUGL_KEY_NONE;
+  }
+
+  return character;
+}
+
+static uint32_t
 puglPrintableKey(const EmscriptenKeyboardEvent* const event)
 {
+  const uint32_t natural = puglSingleUtf8CodePoint(event->key);
+  if (natural && !event->shiftKey && !event->ctrlKey && !event->altKey &&
+      !event->metaKey) {
+    if (natural < 0x80U) {
+      const unsigned char c = (unsigned char)natural;
+      return (uint32_t)(isupper(c) ? tolower(c) : c);
+    }
+    return natural;
+  }
+
   const char* const code = event->code;
   if (!strncmp(code, "Key", 3U) && code[3] >= 'A' && code[3] <= 'Z' &&
       code[4] == '\0') {
@@ -436,13 +597,12 @@ puglPrintableKey(const EmscriptenKeyboardEvent* const event)
     }
   }
 
-  const size_t length = strlen(event->key);
-  if (length == 1U) {
-    const unsigned char c = (unsigned char)event->key[0];
+  if (natural < 0x80U) {
+    const unsigned char c = (unsigned char)natural;
     return (uint32_t)(isupper(c) ? tolower(c) : c);
   }
 
-  return PUGL_KEY_NONE;
+  return natural;
 }
 
 static bool
@@ -462,7 +622,8 @@ puglKeyCallback(const int                            eventType,
   }
 
   const uint32_t special = puglSpecialKey(browserEvent);
-  const PuglKey  key = (PuglKey)(special ? special : puglPrintableKey(browserEvent));
+  const PuglKey  key =
+    (PuglKey)(special ? special : puglPrintableKey(browserEvent));
   const unsigned browserMods =
     (browserEvent->shiftKey ? 1U : 0U) |
     (browserEvent->ctrlKey ? 2U : 0U) |
@@ -755,6 +916,11 @@ puglEmscriptenRegisterInput(PuglView* const view)
     return PUGL_FAILURE;
   }
 
+  char inputSelector[PUGL_BROWSER_INPUT_SELECTOR_SIZE] = {0};
+  if (!puglInputSelector(view, inputSelector)) {
+    return PUGL_REGISTRATION_FAILED;
+  }
+
   uintptr_t token = puglNextBrowserToken++;
   if (!token) {
     token = puglNextBrowserToken++;
@@ -780,13 +946,13 @@ puglEmscriptenRegisterInput(PuglView* const view)
   } while (0)
 
   REGISTER(emscripten_set_keydown_callback(
-    view->impl->canvasSelector, binding, false, puglKeyCallback));
+    inputSelector, binding, false, puglKeyCallback));
   REGISTER(emscripten_set_keyup_callback(
-    view->impl->canvasSelector, binding, false, puglKeyCallback));
+    inputSelector, binding, false, puglKeyCallback));
   REGISTER(emscripten_set_focus_callback(
-    view->impl->canvasSelector, binding, false, puglFocusCallback));
+    inputSelector, binding, false, puglFocusCallback));
   REGISTER(emscripten_set_blur_callback(
-    view->impl->canvasSelector, binding, false, puglFocusCallback));
+    inputSelector, binding, false, puglFocusCallback));
 
 #undef REGISTER
 
@@ -810,16 +976,17 @@ puglEmscriptenUnregisterInput(PuglView* const view)
   }
 
   binding->view = NULL;
+
+  char inputSelector[PUGL_BROWSER_INPUT_SELECTOR_SIZE] = {0};
+  if (puglInputSelector(view, inputSelector)) {
+    (void)emscripten_set_keydown_callback(inputSelector, NULL, false, NULL);
+    (void)emscripten_set_keyup_callback(inputSelector, NULL, false, NULL);
+    (void)emscripten_set_focus_callback(inputSelector, NULL, false, NULL);
+    (void)emscripten_set_blur_callback(inputSelector, NULL, false, NULL);
+  }
+
   if (view->impl->canvasSelector[0]) {
     puglBrowserUninstallInput(view->impl->canvasSelector);
-    (void)emscripten_set_keydown_callback(
-      view->impl->canvasSelector, NULL, false, NULL);
-    (void)emscripten_set_keyup_callback(
-      view->impl->canvasSelector, NULL, false, NULL);
-    (void)emscripten_set_focus_callback(
-      view->impl->canvasSelector, NULL, false, NULL);
-    (void)emscripten_set_blur_callback(
-      view->impl->canvasSelector, NULL, false, NULL);
   }
 
   puglRemoveBinding(binding);
