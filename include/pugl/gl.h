@@ -11,7 +11,9 @@
    enable pure portable programs. */
 
 #ifndef PUGL_NO_INCLUDE_GL_H
-#  ifdef __APPLE__
+#  ifdef __EMSCRIPTEN__
+#    include <GLES3/gl3.h> // IWYU pragma: export
+#  elif defined(__APPLE__)
 #    include <OpenGL/gl.h> // IWYU pragma: export
 #  else
 #    ifdef _WIN32
