@@ -114,6 +114,8 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
     textInput: input,
     mods: 0,
     lockMods: 0,
+    composing: false,
+    compositionCommit: null,
   };
 
   handlers.keyMods = (event) => {
@@ -144,20 +146,38 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
       event.inputType === 'insertCompositionText' ||
       event.inputType === 'insertFromComposition';
     if (!compositionInput && event.data) {
+      handlers.compositionCommit = null;
       emitText(event.data);
+      input.value = String();
     }
-    input.value = '';
   };
 
-  handlers.inputEvent = () => {
-    input.value = '';
+  handlers.inputEvent = (event) => {
+    if (event.isComposing || handlers.composing) {
+      return;
+    }
+
+    const value = input.value;
+    if (value && value !== handlers.compositionCommit) {
+      emitText(value);
+    }
+
+    handlers.compositionCommit = null;
+    input.value = String();
+  };
+
+  handlers.compositionStart = () => {
+    handlers.composing = true;
+    handlers.compositionCommit = null;
   };
 
   handlers.compositionEnd = (event) => {
-    if (event.data) {
-      emitText(event.data);
+    handlers.composing = false;
+    handlers.compositionCommit = event.data ? String(event.data) : null;
+    if (handlers.compositionCommit) {
+      emitText(handlers.compositionCommit);
     }
-    input.value = '';
+    input.value = String();
   };
 
   const pointer = (kind) => (event) => {
@@ -253,6 +273,7 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
   input.addEventListener('keyup', handlers.keyMods, true);
   input.addEventListener('beforeinput', handlers.text, false);
   input.addEventListener('input', handlers.inputEvent, false);
+  input.addEventListener('compositionstart', handlers.compositionStart, false);
   input.addEventListener('compositionend', handlers.compositionEnd, false);
   element.addEventListener('focus', handlers.canvasFocus, false);
   element.addEventListener('pointerenter', handlers.pointerEnter, false);
@@ -286,6 +307,7 @@ EM_JS(void, puglBrowserUninstallInput, (const char* selector), {
     input.removeEventListener('keyup', handlers.keyMods, true);
     input.removeEventListener('beforeinput', handlers.text, false);
     input.removeEventListener('input', handlers.inputEvent, false);
+    input.removeEventListener('compositionstart', handlers.compositionStart, false);
     input.removeEventListener('compositionend', handlers.compositionEnd, false);
   }
 
