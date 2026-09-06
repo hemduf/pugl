@@ -1421,8 +1421,9 @@ puglGetNumClipboardTypes(const PuglView* const view,
     return puglBrowserClipboard.type ? 1U : 0U;
   }
 
-  return clipboard == PUGL_CLIPBOARD_DRAG &&
-             puglFindBrowserDropRegistration(view)
+  return clipboard == PUGL_CLIPBOARD_DRAG && view == puglBrowserOfferView &&
+             puglBrowserOffer &&
+             puglBrowserOffer->clipboard == PUGL_CLIPBOARD_DRAG
            ? 1U
            : 0U;
 }
@@ -1440,8 +1441,9 @@ puglGetClipboardType(const PuglView* const view,
     return puglBrowserClipboard.type;
   }
 
-  return clipboard == PUGL_CLIPBOARD_DRAG &&
-             puglFindBrowserDropRegistration(view)
+  return clipboard == PUGL_CLIPBOARD_DRAG && view == puglBrowserOfferView &&
+             puglBrowserOffer &&
+             puglBrowserOffer->clipboard == PUGL_CLIPBOARD_DRAG
            ? puglBrowserTextType
            : NULL;
 }
