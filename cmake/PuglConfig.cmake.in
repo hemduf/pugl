@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: 0BSD OR ISC
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if(APPLE)
+  # Apple framework paths are embedded in the exported targets.
+elseif(WIN32)
+  # Pugl only depends on Windows system libraries here.
+elseif(NOT EMSCRIPTEN)
+  find_dependency(X11)
+endif()
+
+if(@PUGL_CONFIG_HAS_OPENGL@)
+  find_dependency(OpenGL)
+endif()
+
+if(@PUGL_CONFIG_HAS_CAIRO@)
+  find_dependency(PkgConfig)
+  pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
+endif()
+
+if(@PUGL_CONFIG_HAS_VULKAN@)
+  find_dependency(Vulkan)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/PuglTargets.cmake")
+check_required_components(Pugl)
