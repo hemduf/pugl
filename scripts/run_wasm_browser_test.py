@@ -89,6 +89,7 @@ def exercise_pugl_input(page: object) -> None:
         raise RuntimeError("Expected exactly one Pugl browser text input")
 
     text_input.focus()
+    page.keyboard.press("a")
     page.keyboard.down("Shift")
     try:
         page.keyboard.insert_text("É")

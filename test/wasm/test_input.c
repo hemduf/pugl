@@ -26,6 +26,7 @@ typedef struct {
   unsigned          keyRelease;
   unsigned          text;
   unsigned          compositionText;
+  unsigned          keyboardText;
   unsigned          pointerIn;
   unsigned          pointerOut;
   unsigned          motion;
@@ -70,12 +71,13 @@ fail(const char* const expression, const int line)
 {
   fprintf(stderr,
           "Input check failed at line %d: %s "
-          "[text=%u composition=%u focusIn=%u focusOut=%u "
+          "[text=%u composition=%u keyboard=%u focusIn=%u focusOut=%u "
           "keyPress=%u keyRelease=%u configure=%u]\n",
           line,
           expression,
           state.text,
           state.compositionText,
+          state.keyboardText,
           state.focusIn,
           state.focusOut,
           state.keyPress,
@@ -116,6 +118,8 @@ onEvent(PuglView* const eventView, const PuglEvent* const event)
     testState->lastText = event->text;
     if (event->text.character == 0x6F22U) {
       ++testState->compositionText;
+    } else if (event->text.character == (uint32_t)'a') {
+      ++testState->keyboardText;
     }
     break;
   case PUGL_POINTER_IN:
@@ -247,8 +251,9 @@ puglWasmInputFinish(void)
   CHECK(world);
   CHECK(view);
   CHECK(nativeView != 0U);
-  CHECK(state.text == 2U);
+  CHECK(state.text == 3U);
   CHECK(state.compositionText == 1U);
+  CHECK(state.keyboardText == 1U);
   CHECK(state.lastText.character == 0x00C9U);
   CHECK(strcmp(state.lastText.string, "É") == 0);
   CHECK((state.lastText.state & PUGL_MOD_SHIFT) != 0U);
@@ -313,6 +318,7 @@ main(void)
   CHECK((state.lastKey.state & PUGL_MOD_CTRL) != 0U);
   CHECK(state.text == 1U);
   CHECK(state.compositionText == 1U);
+  CHECK(state.keyboardText == 0U);
   CHECK(state.pointerIn >= 1U);
   CHECK(state.pointerOut >= 1U);
   CHECK(state.motion >= 1U);
