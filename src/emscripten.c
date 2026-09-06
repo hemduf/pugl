@@ -718,5 +718,3 @@ puglSetCursor(PuglView* const view, const PuglCursor cursor)
   (void)cursor;
   return PUGL_UNSUPPORTED;
 }
-
-#include "emscripten_events.c"

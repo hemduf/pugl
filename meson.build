@@ -263,7 +263,7 @@ elif host_machine.system() == 'emscripten'
   endif
 
   platform = 'emscripten'
-  platform_sources = files('src/emscripten.c')
+  platform_sources = files('src/emscripten.c', 'src/emscripten_events.c')
   platform_args = []
   core_deps = []
   backend_extension = '.c'
