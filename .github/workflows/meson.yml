@@ -247,7 +247,7 @@ jobs:
         run: >-
           python scripts/run_wasm_browser_test.py
           build-wasm/test/wasm/pugl_wasm_input.html
-          --passive
+          --pugl-input
           --diagnostics-dir build-wasm/browser-diagnostics/input
       - name: Upload browser diagnostics
         if: failure()

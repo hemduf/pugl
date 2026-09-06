@@ -32,6 +32,7 @@ typedef struct {
   unsigned          buttonRelease;
   unsigned          scroll;
   unsigned          configure;
+  uint32_t          unicodeKey;
   PuglKeyEvent       lastKey;
   PuglTextEvent      lastText;
   PuglMotionEvent    lastMotion;
@@ -39,6 +40,11 @@ typedef struct {
   PuglScrollEvent    lastScroll;
   PuglConfigureEvent lastConfigure;
 } TestState;
+
+static TestState      state;
+static PuglWorld*     world;
+static PuglView*      view;
+static PuglNativeView nativeView;
 
 static void
 setBrowserResult(const bool pass)
@@ -50,6 +56,14 @@ setBrowserResult(const bool pass)
            "document.body.dataset.puglReady='true';");
 }
 
+static void
+setBrowserReady(void)
+{
+  emscripten_run_script(
+    "document.body.dataset.puglTest='pending';"
+    "document.body.dataset.puglReady='true';");
+}
+
 static int
 fail(const char* const expression, const int line)
 {
@@ -59,57 +73,60 @@ fail(const char* const expression, const int line)
 }
 
 static PuglStatus
-onEvent(PuglView* const view, const PuglEvent* const event)
+onEvent(PuglView* const eventView, const PuglEvent* const event)
 {
-  TestState* const state = (TestState*)puglGetHandle(view);
-  if (!state) {
+  TestState* const testState = (TestState*)puglGetHandle(eventView);
+  if (!testState) {
     return PUGL_FAILURE;
   }
 
   switch (event->type) {
   case PUGL_FOCUS_IN:
-    ++state->focusIn;
+    ++testState->focusIn;
     break;
   case PUGL_FOCUS_OUT:
-    ++state->focusOut;
+    ++testState->focusOut;
     break;
   case PUGL_KEY_PRESS:
-    ++state->keyPress;
-    state->lastKey = event->key;
+    ++testState->keyPress;
+    testState->lastKey = event->key;
+    if (event->key.keycode == 233U) {
+      testState->unicodeKey = event->key.key;
+    }
     break;
   case PUGL_KEY_RELEASE:
-    ++state->keyRelease;
-    state->lastKey = event->key;
+    ++testState->keyRelease;
+    testState->lastKey = event->key;
     break;
   case PUGL_TEXT:
-    ++state->text;
-    state->lastText = event->text;
+    ++testState->text;
+    testState->lastText = event->text;
     break;
   case PUGL_POINTER_IN:
-    ++state->pointerIn;
+    ++testState->pointerIn;
     break;
   case PUGL_POINTER_OUT:
-    ++state->pointerOut;
+    ++testState->pointerOut;
     break;
   case PUGL_MOTION:
-    ++state->motion;
-    state->lastMotion = event->motion;
+    ++testState->motion;
+    testState->lastMotion = event->motion;
     break;
   case PUGL_BUTTON_PRESS:
-    ++state->buttonPress;
-    state->lastButton = event->button;
+    ++testState->buttonPress;
+    testState->lastButton = event->button;
     break;
   case PUGL_BUTTON_RELEASE:
-    ++state->buttonRelease;
-    state->lastButton = event->button;
+    ++testState->buttonRelease;
+    testState->lastButton = event->button;
     break;
   case PUGL_SCROLL:
-    ++state->scroll;
-    state->lastScroll = event->scroll;
+    ++testState->scroll;
+    testState->lastScroll = event->scroll;
     break;
   case PUGL_CONFIGURE:
-    ++state->configure;
-    state->lastConfigure = event->configure;
+    ++testState->configure;
+    testState->lastConfigure = event->configure;
     break;
   default:
     break;
@@ -119,21 +136,26 @@ onEvent(PuglView* const view, const PuglEvent* const event)
 }
 
 static void
-dispatchInput(const PuglNativeView nativeView)
+dispatchInput(const PuglNativeView currentNativeView)
 {
-  char script[4096] = {0};
+  char script[4608] = {0};
   snprintf(
     script,
     sizeof(script),
     "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR "');"
     "if(!e)throw new Error('missing Pugl canvas');"
+    "const input=document.getElementById(e.id+'-input');"
+    "if(!input)throw new Error('missing Pugl text input');"
     "e.focus();"
-    "e.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',code:'ArrowLeft',"
+    "if(document.activeElement!==input)throw new Error('canvas focus did not redirect');"
+    "input.dispatchEvent(new KeyboardEvent('keydown',{key:'é',code:'KeyE',"
+    "keyCode:233,which:233,bubbles:true}));"
+    "input.dispatchEvent(new KeyboardEvent('keyup',{key:'é',code:'KeyE',"
+    "keyCode:233,which:233,bubbles:true}));"
+    "input.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',code:'ArrowLeft',"
     "keyCode:37,which:37,shiftKey:true,ctrlKey:true,bubbles:true}));"
-    "e.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',code:'ArrowLeft',"
+    "input.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',code:'ArrowLeft',"
     "keyCode:37,which:37,shiftKey:true,ctrlKey:true,bubbles:true}));"
-    "e.dispatchEvent(new InputEvent('beforeinput',{data:'é',inputType:'insertText',"
-    "bubbles:true,cancelable:true}));"
     "const r=e.getBoundingClientRect();"
     "const p=(type,button=0)=>new PointerEvent(type,{pointerId:7,pointerType:'pen',"
     "clientX:r.left+25,clientY:r.top+30,screenX:125,screenY:130,button,buttons:1,"
@@ -146,20 +168,22 @@ dispatchInput(const PuglNativeView nativeView)
     "e.dispatchEvent(new WheelEvent('wheel',{clientX:r.left+25,clientY:r.top+30,"
     "screenX:125,screenY:130,deltaX:1,deltaY:2,deltaMode:1,altKey:true,bubbles:true}));"
     "e.style.width='360px';e.style.height='210px';"
-    "window.dispatchEvent(new Event('resize'));"
-    "e.blur();})()",
-    (uintptr_t)nativeView);
+    "window.dispatchEvent(new Event('resize'));})()",
+    (uintptr_t)currentNativeView);
   emscripten_run_script(script);
 }
 
 static void
-saveDetachedCanvas(const PuglNativeView nativeView)
+saveDetachedTargets(const PuglNativeView currentNativeView)
 {
-  char script[256] = {0};
-  snprintf(script,
-           sizeof(script),
-           "window.puglDetached=document.getElementById('pugl-view-%" PRIuPTR "');",
-           (uintptr_t)nativeView);
+  char script[384] = {0};
+  snprintf(
+    script,
+    sizeof(script),
+    "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR "');"
+    "window.puglDetachedCanvas=e;"
+    "window.puglDetachedInput=e?document.getElementById(e.id+'-input'):null;})()",
+    (uintptr_t)currentNativeView);
   emscripten_run_script(script);
 }
 
@@ -167,20 +191,75 @@ static void
 dispatchDetachedInput(void)
 {
   emscripten_run_script(
-    "(()=>{const e=window.puglDetached;if(!e)return;"
-    "e.dispatchEvent(new KeyboardEvent('keydown',{key:'a',code:'KeyA',bubbles:true}));"
-    "e.dispatchEvent(new PointerEvent('pointermove',{clientX:1,clientY:1,bubbles:true}));"
+    "(()=>{const e=window.puglDetachedCanvas;"
+    "const input=window.puglDetachedInput;"
+    "if(input){"
+    "input.dispatchEvent(new KeyboardEvent('keydown',{key:'a',code:'KeyA',bubbles:true}));"
+    "input.dispatchEvent(new InputEvent('beforeinput',{data:'x',inputType:'insertText',"
+    "bubbles:true,cancelable:true}));}"
+    "if(e)e.dispatchEvent(new PointerEvent('pointermove',{clientX:1,clientY:1,bubbles:true}));"
     "})()");
+}
+
+static bool
+browserInputExists(const PuglNativeView currentNativeView)
+{
+  char script[256] = {0};
+  snprintf(script,
+           sizeof(script),
+           "!!document.getElementById('pugl-view-%" PRIuPTR "-input')",
+           (uintptr_t)currentNativeView);
+  return emscripten_run_script_int(script) != 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int
+puglWasmInputFinish(void)
+{
+  CHECK(world);
+  CHECK(view);
+  CHECK(nativeView != 0U);
+  CHECK(state.text == 1U);
+  CHECK(state.lastText.character == 0x00C9U);
+  CHECK(strcmp(state.lastText.string, "É") == 0);
+  CHECK((state.lastText.state & PUGL_MOD_SHIFT) != 0U);
+  CHECK(puglHasFocus(view));
+
+  emscripten_run_script("document.activeElement.blur()");
+  CHECK(!puglHasFocus(view));
+  CHECK(state.focusOut >= 1U);
+
+  CHECK(puglGrabFocus(view) == PUGL_SUCCESS);
+  CHECK(puglHasFocus(view));
+  CHECK(state.focusIn >= 2U);
+
+  saveDetachedTargets(nativeView);
+  const unsigned keysBeforeTeardown   = state.keyPress;
+  const unsigned textBeforeTeardown   = state.text;
+  const unsigned motionBeforeTeardown = state.motion;
+  CHECK(puglUnrealize(view) == PUGL_SUCCESS);
+  CHECK(!browserInputExists(nativeView));
+  dispatchDetachedInput();
+  CHECK(state.keyPress == keysBeforeTeardown);
+  CHECK(state.text == textBeforeTeardown);
+  CHECK(state.motion == motionBeforeTeardown);
+
+  puglFreeView(view);
+  puglFreeWorld(world);
+  view       = NULL;
+  world      = NULL;
+  nativeView = 0U;
+  setBrowserResult(true);
+  return 0;
 }
 
 int
 main(void)
 {
-  TestState state = {0};
-  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  state = (TestState){0};
+  world = puglNewWorld(PUGL_PROGRAM, 0U);
   CHECK(world);
 
-  PuglView* const view = puglNewView(world);
+  view = puglNewView(world);
   CHECK(view);
   puglSetHandle(view, &state);
   puglSetBackend(view, puglStubBackend());
@@ -188,22 +267,21 @@ main(void)
   CHECK(puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 320U, 180U) == PUGL_SUCCESS);
   CHECK(puglShow(view, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS);
 
-  const PuglNativeView nativeView = puglGetNativeView(view);
+  nativeView = puglGetNativeView(view);
   CHECK(nativeView != 0U);
+  CHECK(browserInputExists(nativeView));
 
   const unsigned initialConfigure = state.configure;
   dispatchInput(nativeView);
 
   CHECK(state.focusIn >= 1U);
-  CHECK(state.focusOut >= 1U);
-  CHECK(state.keyPress == 1U);
-  CHECK(state.keyRelease == 1U);
+  CHECK(state.keyPress == 2U);
+  CHECK(state.keyRelease == 2U);
+  CHECK(state.unicodeKey == 0x00E9U);
   CHECK(state.lastKey.key == PUGL_KEY_LEFT);
   CHECK((state.lastKey.state & PUGL_MOD_SHIFT) != 0U);
   CHECK((state.lastKey.state & PUGL_MOD_CTRL) != 0U);
-  CHECK(state.text == 1U);
-  CHECK(state.lastText.character == 0x00E9U);
-  CHECK(strcmp(state.lastText.string, "é") == 0);
+  CHECK(state.text == 0U);
   CHECK(state.pointerIn >= 1U);
   CHECK(state.pointerOut >= 1U);
   CHECK(state.motion >= 1U);
@@ -221,22 +299,8 @@ main(void)
   CHECK(state.configure > initialConfigure);
   CHECK(state.lastConfigure.width == 360U);
   CHECK(state.lastConfigure.height == 210U);
-
-  CHECK(puglGrabFocus(view) == PUGL_SUCCESS);
   CHECK(puglHasFocus(view));
-  emscripten_run_script("document.activeElement.blur()");
-  CHECK(!puglHasFocus(view));
 
-  saveDetachedCanvas(nativeView);
-  const unsigned keysBeforeTeardown = state.keyPress;
-  const unsigned motionBeforeTeardown = state.motion;
-  CHECK(puglUnrealize(view) == PUGL_SUCCESS);
-  dispatchDetachedInput();
-  CHECK(state.keyPress == keysBeforeTeardown);
-  CHECK(state.motion == motionBeforeTeardown);
-
-  puglFreeView(view);
-  puglFreeWorld(world);
-  setBrowserResult(true);
+  setBrowserReady();
   return 0;
 }
