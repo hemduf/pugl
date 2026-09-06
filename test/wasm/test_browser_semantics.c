@@ -34,6 +34,16 @@ EM_JS(int,
   return left === expectedLeft && top === expectedTop;
 });
 
+EM_JS(int, puglTestCanvasIsResizable, (uintptr_t nativeView), {
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  if (!element) {
+    return 0;
+  }
+
+  const style = getComputedStyle(element);
+  return style.resize === 'both' && style.overflow !== 'visible';
+});
+
 EM_JS(int, puglTestCreateHost, (uintptr_t nativeView), {
   const selector = `[data-pugl-native-view="${nativeView}"]`;
   if (!nativeView || document.querySelector(selector)) {
@@ -343,6 +353,46 @@ puglTestAncestorCenterContract(void)
   return centered;
 }
 
+static bool
+puglTestResizableViewContract(void)
+{
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const view = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreEvent);
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 44U, 28U);
+  const PuglStatus hintStatus =
+    puglSetViewHint(view, PUGL_RESIZABLE, PUGL_TRUE);
+  const bool realized = puglShow(view, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
+  const PuglNativeView nativeView = puglGetNativeView(view);
+  const bool resizable = hintStatus == PUGL_SUCCESS && realized && nativeView &&
+                         puglGetViewHint(view, PUGL_RESIZABLE) == PUGL_TRUE &&
+                         puglTestCanvasIsResizable(nativeView);
+
+  if (realized) {
+    (void)puglUnrealize(view);
+  }
+  puglFreeView(view);
+  puglFreeWorld(world);
+
+  if (!resizable) {
+    fprintf(stderr,
+            "Browser PUGL_RESIZABLE views must expose a native CSS resize affordance\n");
+  }
+
+  return resizable;
+}
+
 static void
 puglRunBrowserSemantics(void* const data)
 {
@@ -352,7 +402,8 @@ puglRunBrowserSemantics(void* const data)
       !puglTestUnsupportedDesktopWindowContract() ||
       !puglTestNativeViewIdentityContract() ||
       !puglTestBrowserEmbeddingContract() ||
-      !puglTestAncestorCenterContract()) {
+      !puglTestAncestorCenterContract() ||
+      !puglTestResizableViewContract()) {
     emscripten_run_script(
       "throw new Error('Browser platform semantics contract failed')");
   }
