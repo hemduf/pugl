@@ -19,7 +19,12 @@ struct PuglWorldInternalsImpl {
 struct PuglInternalsImpl {
   PuglSurface* surface;
   PuglEvent    pendingExpose;
+  void*        eventBinding;
   uintptr_t    id;
+  double       pointerX;
+  double       pointerY;
+  double       pointerRootX;
+  double       pointerRootY;
   char         canvasSelector[48];
   bool         mapped;
 };

@@ -3,6 +3,7 @@
 
 #include "emscripten_platform.h"
 
+#include "emscripten_events.h"
 #include "internal.h"
 #include "platform.h"
 #include "types.h"
@@ -221,6 +222,7 @@ puglFreeViewInternals(PuglView* const view)
       (void)puglUnrealize(view);
     }
 
+    puglEmscriptenFreeInput(view);
     free(view->impl);
   }
 }
@@ -280,8 +282,16 @@ puglRealize(PuglView* const view)
     return st;
   }
 
+  if ((st = puglEmscriptenRegisterInput(view))) {
+    view->backend->destroy(view);
+    puglDestroyDomView(impl->id);
+    impl->id = 0U;
+    return st;
+  }
+
   st = puglDispatchSimpleEvent(view, PUGL_REALIZE);
   if (st) {
+    puglEmscriptenUnregisterInput(view);
     view->backend->destroy(view);
     puglDestroyDomView(impl->id);
     impl->id = 0U;
@@ -300,6 +310,7 @@ puglUnrealize(PuglView* const view)
 
   const uintptr_t id = impl->id;
   const PuglStatus st = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
+  puglEmscriptenUnregisterInput(view);
   view->backend->destroy(view);
   puglDestroyDomView(id);
 
@@ -377,15 +388,13 @@ puglSetViewStyle(PuglView* const view, const PuglViewStyleFlags flags)
 PuglStatus
 puglGrabFocus(PuglView* const view)
 {
-  (void)view;
-  return PUGL_UNSUPPORTED;
+  return puglEmscriptenGrabFocus(view);
 }
 
 bool
 puglHasFocus(const PuglView* const view)
 {
-  (void)view;
-  return false;
+  return puglEmscriptenHasFocus(view);
 }
 
 PuglStatus
@@ -709,3 +718,5 @@ puglSetCursor(PuglView* const view, const PuglCursor cursor)
   (void)cursor;
   return PUGL_UNSUPPORTED;
 }
+
+#include "emscripten_events.c"
