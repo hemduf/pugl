@@ -34,20 +34,28 @@ typedef struct {
   bool       failed;
 } TestContext;
 
-EM_JS(void, puglInstallTestClipboard, (), {
-  let value = '';
-  Object.defineProperty(navigator, 'clipboard', {
-    configurable: true,
-    value: {
-      writeText(text) {
-        value = String(text);
-        return Promise.resolve();
-      },
-      readText() {
-        return Promise.resolve(value);
-      }
-    }
-  });
+EM_JS(int, puglInstallTestClipboard, (), {
+  if (typeof navigator === 'undefined' || !navigator.clipboard) {
+    return 0;
+  }
+
+  const clipboard = navigator.clipboard;
+  globalThis.__puglTestClipboardValue = String();
+
+  const writeText = (text) => {
+    globalThis.__puglTestClipboardValue = String(text);
+    return Promise.resolve();
+  };
+  const readText = () => Promise.resolve(globalThis.__puglTestClipboardValue);
+
+  try {
+    clipboard.writeText = writeText;
+    clipboard.readText = readText;
+  } catch (_) {
+    return 0;
+  }
+
+  return clipboard.writeText === writeText && clipboard.readText === readText;
 });
 
 EM_JS(void, puglDispatchTestInput, (unsigned id), {
@@ -258,7 +266,11 @@ main(void)
     return 1;
   }
 
-  puglInstallTestClipboard();
+  if (!puglInstallTestClipboard()) {
+    fail(context, "browser clipboard shim could not be installed");
+    return 1;
+  }
+
   if (puglSetClipboard(context->view,
                        PUGL_CLIPBOARD_GENERAL,
                        "text/plain;charset=utf-8",
