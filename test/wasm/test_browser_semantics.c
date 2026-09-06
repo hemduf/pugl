@@ -63,10 +63,20 @@ puglTestUnsupportedDesktopWindowContract(void)
     return;
   }
 
-  const PuglStatus positionStatus = puglSetWindowPosition(view, 12, 34);
+  puglSetBackend(view, puglStubBackend());
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);
+  const bool realized = puglShow(view, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
+
+  const PuglStatus positionStatus =
+    realized
+      ? puglSetPositionHint(view, PUGL_CURRENT_POSITION, 12, 34)
+      : PUGL_FAILURE;
   const PuglStatus transientStatus =
     puglSetTransientParent(view, (PuglNativeView)1234U);
 
+  if (realized) {
+    (void)puglUnrealize(view);
+  }
   puglFreeView(view);
   puglFreeWorld(world);
 
