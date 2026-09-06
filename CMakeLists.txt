@@ -56,6 +56,7 @@ if(EMSCRIPTEN)
   set(pugl_platform_sources
     src/emscripten.c
     src/emscripten_events.c
+    src/emscripten_clipboard.c
   )
   set(pugl_soversion "")
 elseif(APPLE)
