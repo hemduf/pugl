@@ -19,6 +19,21 @@ EM_JS(int,
          getComputedStyle(element).cursor === UTF8ToString(expected);
 });
 
+EM_JS(int,
+      puglTestCanvasIsViewportCentered,
+      (uintptr_t nativeView, unsigned width, unsigned height), {
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  if (!element || typeof window === 'undefined') {
+    return 0;
+  }
+
+  const left = Number.parseInt(element.style.left, 10);
+  const top = Number.parseInt(element.style.top, 10);
+  const expectedLeft = Math.trunc(window.innerWidth / 2) - Math.trunc(width / 2);
+  const expectedTop = Math.trunc(window.innerHeight / 2) - Math.trunc(height / 2);
+  return left === expectedLeft && top === expectedTop;
+});
+
 EM_JS(int, puglTestCreateHost, (uintptr_t nativeView), {
   const selector = `[data-pugl-native-view="${nativeView}"]`;
   if (!nativeView || document.querySelector(selector)) {
@@ -288,6 +303,46 @@ puglTestBrowserEmbeddingContract(void)
   return embedded && cleanTeardown && missingParentRejected;
 }
 
+static bool
+puglTestAncestorCenterContract(void)
+{
+  static const unsigned width = 40U;
+  static const unsigned height = 20U;
+
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const view = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreEvent);
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, width, height);
+
+  const bool realized = puglShow(view, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
+  const PuglNativeView nativeView = puglGetNativeView(view);
+  const bool centered = realized && nativeView &&
+                        puglTestCanvasIsViewportCentered(nativeView, width, height);
+
+  if (realized) {
+    (void)puglUnrealize(view);
+  }
+  puglFreeView(view);
+  puglFreeWorld(world);
+
+  if (!centered) {
+    fprintf(stderr, "Browser ancestor center must be the viewport center point\n");
+  }
+
+  return centered;
+}
+
 static void
 puglRunBrowserSemantics(void* const data)
 {
@@ -296,7 +351,8 @@ puglRunBrowserSemantics(void* const data)
   if (!puglTestBrowserCursorContract() ||
       !puglTestUnsupportedDesktopWindowContract() ||
       !puglTestNativeViewIdentityContract() ||
-      !puglTestBrowserEmbeddingContract()) {
+      !puglTestBrowserEmbeddingContract() ||
+      !puglTestAncestorCenterContract()) {
     emscripten_run_script(
       "throw new Error('Browser platform semantics contract failed')");
   }
