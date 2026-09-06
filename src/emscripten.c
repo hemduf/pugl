@@ -64,6 +64,7 @@ static PuglBrowserClipboard     puglBrowserClipboard     = {NULL, NULL, 0U};
 static unsigned char*           puglBrowserDragData      = NULL;
 static size_t                   puglBrowserDragLen       = 0U;
 static PuglView*                puglBrowserDragView      = NULL;
+static uintptr_t                puglNextDomViewId        = 1U;
 static uintptr_t                puglNextPasteToken       = 1U;
 static uintptr_t                puglNextDropToken        = 1U;
 static PuglView*                puglBrowserOfferView     = NULL;
@@ -233,8 +234,8 @@ EM_JS(void, puglBrowserUninstallDrop, (const char* selector), {
   delete element.__puglDrop;
 });
 
-EM_JS(int, puglBrowserSetCursor, (const char* selector, int cursor), {
-  const element = document.querySelector(UTF8ToString(selector));
+EM_JS(int, puglBrowserSetCursor, (uintptr_t id, int cursor), {
+  const element = document.getElementById(`pugl-view-${id}`);
   if (!element) {
     return 0;
   }
@@ -872,7 +873,11 @@ puglRealize(PuglView* const view)
   const PuglArea  size = puglGetInitialSize(view);
   const PuglPoint pos  = puglGetInitialPosition(view, size);
 
-  impl->id = view->world->impl->nextViewId++;
+  impl->id = puglNextDomViewId++;
+  if (!impl->id) {
+    impl->id = puglNextDomViewId++;
+  }
+
   snprintf(impl->canvasSelector,
            sizeof(impl->canvasSelector),
            "#pugl-view-%" PRIuPTR,
@@ -1576,7 +1581,6 @@ puglSetCursor(PuglView* const view, const PuglCursor cursor)
     return PUGL_FAILURE;
   }
 
-  return puglBrowserSetCursor(view->impl->canvasSelector, (int)cursor)
-           ? PUGL_SUCCESS
-           : PUGL_FAILURE;
+  return puglBrowserSetCursor(view->impl->id, (int)cursor) ? PUGL_SUCCESS
+                                                           : PUGL_FAILURE;
 }
