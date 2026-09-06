@@ -1073,15 +1073,17 @@ puglSetClipboard(PuglView* const     view,
                  const void* const   data,
                  const size_t        len)
 {
-  if (!view || !view->impl || !view->impl->id || !type || (!data && len)) {
+  if (!view || !view->impl || !view->impl->id || (!data && len)) {
     return PUGL_BAD_PARAMETER;
   }
 
-  if (clipboard != PUGL_CLIPBOARD_GENERAL || strcmp(type, "text/plain")) {
+  const char* const normalizedType = type ? type : "text/plain";
+  if (clipboard != PUGL_CLIPBOARD_GENERAL ||
+      strcmp(normalizedType, "text/plain")) {
     return PUGL_UNSUPPORTED;
   }
 
-  const size_t typeLen = strlen(type);
+  const size_t typeLen = strlen(normalizedType);
   char* const newType = (char*)malloc(typeLen + 1U);
   unsigned char* const newData = (unsigned char*)malloc(len + 1U);
   if (!newType || !newData) {
@@ -1090,7 +1092,7 @@ puglSetClipboard(PuglView* const     view,
     return PUGL_NO_MEMORY;
   }
 
-  memcpy(newType, type, typeLen + 1U);
+  memcpy(newType, normalizedType, typeLen + 1U);
   if (len) {
     memcpy(newData, data, len);
   }
