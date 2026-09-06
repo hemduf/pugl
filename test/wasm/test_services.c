@@ -13,6 +13,7 @@
 #include <string.h>
 
 static const char clipboardText[] = "pugl-browser-clipboard";
+static const char dropText[]      = "pugl-browser-drop";
 
 typedef struct {
   PuglWorld* world;
@@ -27,15 +28,46 @@ typedef struct {
   unsigned   clipboardOffers;
   unsigned   clipboardDataEvents;
   unsigned   clipboardWritePolls;
+  unsigned   dragOffers;
+  unsigned   dragDataEvents;
   bool       clientOrderOk;
   bool       timer7ReplacementFailureOk;
   bool       timer7Restarted;
   bool       clipboardOfferOk;
   bool       clipboardDataOk;
   bool       clipboardSecurityOk;
+  bool       dragOfferOk;
+  bool       dragDataOk;
 } TestState;
 
 static TestState state = {0};
+
+EM_JS(int, dispatchBrowserDrop, (uintptr_t nativeView, const char* text), {
+  if (typeof document === 'undefined' || typeof DataTransfer !== 'function' ||
+      typeof DragEvent !== 'function') {
+    return 0;
+  }
+
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  if (!element) {
+    return 0;
+  }
+
+  const transfer = new DataTransfer();
+  transfer.setData('text/plain', UTF8ToString(text));
+  const options = {
+    bubbles: true,
+    cancelable: true,
+    dataTransfer: transfer,
+    clientX: 12,
+    clientY: 14,
+  };
+
+  element.dispatchEvent(new DragEvent('dragenter', options));
+  element.dispatchEvent(new DragEvent('dragover', options));
+  element.dispatchEvent(new DragEvent('drop', options));
+  return 1;
+});
 
 static void
 setResult(const bool pass)
@@ -135,13 +167,13 @@ onEvent(PuglView* const view, const PuglEvent* const event)
     } else {
       state.clientOrderOk = false;
     }
-  } else if (event->type == PUGL_DATA_OFFER) {
+  } else if (event->type == PUGL_DATA_OFFER &&
+             event->offer.clipboard == PUGL_CLIPBOARD_GENERAL) {
     ++state.clipboardOffers;
     const char* const type =
       puglGetClipboardType(view, PUGL_CLIPBOARD_GENERAL, 0U);
     state.clipboardOfferOk =
       state.clipboardOffers == 1U &&
-      event->offer.clipboard == PUGL_CLIPBOARD_GENERAL &&
       puglGetNumClipboardTypes(view, PUGL_CLIPBOARD_GENERAL) == 1U && type &&
       !strcmp(type, "text/plain") &&
       !puglAcceptOffer(view,
@@ -152,20 +184,45 @@ onEvent(PuglView* const view, const PuglEvent* const event)
                        0,
                        64U,
                        64U);
-  } else if (event->type == PUGL_DATA) {
+  } else if (event->type == PUGL_DATA_OFFER &&
+             event->offer.clipboard == PUGL_CLIPBOARD_DRAG) {
+    ++state.dragOffers;
+    const char* const type =
+      puglGetClipboardType(view, PUGL_CLIPBOARD_DRAG, 0U);
+    state.dragOfferOk =
+      state.dragOffers >= 1U &&
+      puglGetNumClipboardTypes(view, PUGL_CLIPBOARD_DRAG) == 1U && type &&
+      !strcmp(type, "text/plain") &&
+      !puglAcceptOffer(view,
+                       &event->offer,
+                       0U,
+                       PUGL_DATA_ACTION_COPY,
+                       0,
+                       0,
+                       64U,
+                       64U);
+  } else if (event->type == PUGL_DATA &&
+             event->data.clipboard == PUGL_CLIPBOARD_GENERAL) {
     ++state.clipboardDataEvents;
     size_t      len  = 0U;
     const void* data =
       puglGetClipboard(view, PUGL_CLIPBOARD_GENERAL, 0U, &len);
     state.clipboardDataOk =
-      state.clipboardDataEvents == 1U &&
-      event->data.clipboard == PUGL_CLIPBOARD_GENERAL &&
-      event->data.typeIndex == 0U && data && len == strlen(clipboardText) &&
-      !memcmp(data, clipboardText, len);
+      state.clipboardDataEvents == 1U && event->data.typeIndex == 0U && data &&
+      len == strlen(clipboardText) && !memcmp(data, clipboardText, len);
 
     if (state.clipboardDataEvents == 1U) {
       state.clipboardSecurityOk = exerciseClipboardSecurityPaths(view);
     }
+  } else if (event->type == PUGL_DATA &&
+             event->data.clipboard == PUGL_CLIPBOARD_DRAG) {
+    ++state.dragDataEvents;
+    size_t      len  = 0U;
+    const void* data =
+      puglGetClipboard(view, PUGL_CLIPBOARD_DRAG, 0U, &len);
+    state.dragDataOk =
+      state.dragDataEvents == 1U && event->data.typeIndex == 0U && data &&
+      len == strlen(dropText) && !memcmp(data, dropText, len);
   }
 
   return PUGL_SUCCESS;
@@ -343,6 +400,18 @@ stopTimer9(void* const data)
 }
 
 static void
+runDrop(void* const data)
+{
+  (void)data;
+
+  if (!state.view ||
+      !dispatchBrowserDrop(puglGetNativeView(state.view), dropText)) {
+    fprintf(stderr, "Browser drag/drop test event could not be dispatched\n");
+    finish(false);
+  }
+}
+
+static void
 finishServices(void* const data)
 {
   (void)data;
@@ -359,14 +428,16 @@ finishServices(void* const data)
     state.timer9Events == state.timer9AtStop &&
     state.teardownTimerEvents == 0U && state.clipboardOffers == 1U &&
     state.clipboardDataEvents == 1U && state.clipboardOfferOk &&
-    state.clipboardDataOk && state.clipboardSecurityOk && writeDenied &&
-    readDenied;
+    state.clipboardDataOk && state.clipboardSecurityOk && state.dragOffers >= 1U &&
+    state.dragDataEvents == 1U && state.dragOfferOk && state.dragDataOk &&
+    writeDenied && readDenied;
 
   if (!pass) {
     fprintf(stderr,
             "Service checks failed: client=%u order=%d timer7=%u failed7=%u "
             "stop7=%u failOk=%d restart=%d timer9=%u stop9=%u teardown=%u "
             "offers=%u data=%u offerOk=%d dataOk=%d securityOk=%d "
+            "dragOffers=%u dragData=%u dragOfferOk=%d dragDataOk=%d "
             "writeDenied=%d readDenied=%d\n",
             state.clientEvents,
             state.clientOrderOk,
@@ -383,6 +454,10 @@ finishServices(void* const data)
             state.clipboardOfferOk,
             state.clipboardDataOk,
             state.clipboardSecurityOk,
+            state.dragOffers,
+            state.dragDataEvents,
+            state.dragOfferOk,
+            state.dragDataOk,
             writeDenied,
             readDenied);
   }
@@ -403,6 +478,15 @@ main(void)
   puglSetBackend(state.view, puglStubBackend());
   puglSetEventFunc(state.view, onEvent);
   puglSetSizeHint(state.view, PUGL_DEFAULT_SIZE, 64U, 64U);
+  puglSetViewHint(state.view, PUGL_ACCEPT_DROP, PUGL_TRUE);
+
+  if (puglRegisterDropType(state.view, NULL) != PUGL_SUCCESS ||
+      puglRegisterDropType(state.view, "application/octet-stream") !=
+        PUGL_UNSUPPORTED) {
+    fprintf(stderr, "Browser text drag/drop registration is not implemented\n");
+    finish(false);
+    return 0;
+  }
 
   if (puglShow(state.view, PUGL_SHOW_PASSIVE)) {
     finish(false);
@@ -444,6 +528,7 @@ main(void)
   emscripten_set_timeout(failTimer7Replacement, 70.0, NULL);
   emscripten_set_timeout(stopTimer9, 100.0, NULL);
   emscripten_set_timeout(restartTimer7, 150.0, NULL);
-  emscripten_set_timeout(finishServices, 600.0, NULL);
+  emscripten_set_timeout(runDrop, 250.0, NULL);
+  emscripten_set_timeout(finishServices, 650.0, NULL);
   return 0;
 }
