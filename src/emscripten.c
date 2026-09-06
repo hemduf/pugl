@@ -696,34 +696,35 @@ puglStartTimer(PuglView* const view, const uintptr_t id, const double timeout)
 
   PuglBrowserTimer* timer = puglFindBrowserTimer(view, id);
   if (timer) {
-    emscripten_clear_interval(timer->intervalId);
-  } else {
-    timer = (PuglBrowserTimer*)calloc(1U, sizeof(PuglBrowserTimer));
-    if (!timer) {
-      return PUGL_NO_MEMORY;
+    const long intervalId =
+      emscripten_set_interval(puglBrowserTimerCallback, timeout * 1000.0, timer);
+    if (intervalId <= 0) {
+      return PUGL_UNKNOWN_ERROR;
     }
 
-    timer->next = puglBrowserTimers;
-    timer->view = view;
-    timer->id   = id;
-    puglBrowserTimers = timer;
+    emscripten_clear_interval(timer->intervalId);
+    timer->intervalId = intervalId;
+    return PUGL_SUCCESS;
   }
+
+  timer = (PuglBrowserTimer*)calloc(1U, sizeof(PuglBrowserTimer));
+  if (!timer) {
+    return PUGL_NO_MEMORY;
+  }
+
+  timer->view = view;
+  timer->id   = id;
 
   const long intervalId =
     emscripten_set_interval(puglBrowserTimerCallback, timeout * 1000.0, timer);
   if (intervalId <= 0) {
-    PuglBrowserTimer** link = &puglBrowserTimers;
-    while (*link && *link != timer) {
-      link = &(*link)->next;
-    }
-    if (*link == timer) {
-      *link = timer->next;
-    }
     free(timer);
     return PUGL_UNKNOWN_ERROR;
   }
 
   timer->intervalId = intervalId;
+  timer->next       = puglBrowserTimers;
+  puglBrowserTimers = timer;
   return PUGL_SUCCESS;
 }
 
