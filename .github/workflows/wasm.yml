@@ -1,0 +1,64 @@
+# Copyright 2026 Fabrizio Duhem
+# SPDX-License-Identifier: 0BSD OR ISC
+
+name: WebAssembly
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  EMSCRIPTEN_IMAGE: emscripten/emsdk:6.0.9
+
+jobs:
+  browser-lifecycle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure with Emscripten
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            -u "$(id -u):$(id -g)" \
+            "$EMSCRIPTEN_IMAGE" \
+            emcmake cmake -S test/wasm -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build lifecycle test
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            -u "$(id -u):$(id -g)" \
+            "$EMSCRIPTEN_IMAGE" \
+            cmake --build build-wasm --target pugl_wasm_lifecycle --verbose
+
+      - name: Run lifecycle test in headless browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8123 --directory build-wasm >/tmp/pugl-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$chrome"
+
+          "$chrome" \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --virtual-time-budget=5000 \
+            --dump-dom \
+            http://127.0.0.1:8123/pugl_wasm_lifecycle.html \
+            > /tmp/pugl-dom.html
+
+          cat /tmp/pugl-dom.html
+          grep -q 'data-pugl-test="pass"' /tmp/pugl-dom.html
