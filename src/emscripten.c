@@ -76,6 +76,9 @@ static bool                     puglBrowserOfferHandled  = false;
 #  define PUGL_BROWSER_EXPORT
 #endif
 
+static PuglCoord
+puglClampCoord(int value);
+
 EM_JS(int, puglBrowserWriteClipboardText, (const char* text), {
   if (typeof navigator === 'undefined' || !navigator.clipboard ||
       typeof navigator.clipboard.writeText !== 'function') {
@@ -1268,6 +1271,10 @@ puglAcceptOffer(PuglView* const                 view,
   }
 
   if (offer->clipboard == PUGL_CLIPBOARD_DRAG) {
+    if (action != PUGL_DATA_ACTION_COPY) {
+      return PUGL_UNSUPPORTED;
+    }
+
     PuglBrowserDropRegistration* const registration =
       puglFindBrowserDropRegistration(view);
     if (!registration) {
