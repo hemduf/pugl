@@ -1,0 +1,84 @@
+name: Apply browser semantics correction
+
+on:
+  push:
+    branches: [feature/emscripten-browser-semantics]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-browser-semantics-correction
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/emscripten-browser-semantics
+          fetch-depth: 0
+
+      - name: Apply focused browser semantics correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/emscripten-browser-semantics
+          git checkout -B feature/emscripten-browser-semantics origin/feature/emscripten-browser-semantics
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/emscripten.c')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  "EM_JS(int, puglBrowserSetCursor, (uintptr_t id, int cursor), {\n  const element = document.getElementById(`pugl-view-${id}`);",
+                  "EM_JS(int, puglBrowserSetCursor, (const char* selector, int cursor), {\n  const element = document.querySelector(UTF8ToString(selector));",
+              ),
+              (
+                  "           \"if(document.getElementById(id))return 0;\"\n           \"const e=document.createElement('canvas');\"",
+                  "           \"if(document.getElementById(id))return 0;\"\n           \"const p='%\" PRIuPTR \"';\"\n           \"const host=p!=='0'?document.querySelector('[data-pugl-native-view=\\\"'+p+'\\\"]'):document.body;\"\n           \"if(!host)return 0;\"\n           \"const e=document.createElement('canvas');\"",
+              ),
+              (
+                  "           \"document.body.appendChild(e);return 1;})()\",\n           view->impl->id,\n           view->impl->id,\n           position.x,",
+                  "           \"host.appendChild(e);return 1;})()\",\n           view->impl->id,\n           view->impl->id,\n           (uintptr_t)view->parent,\n           position.x,",
+              ),
+              (
+                  "  return puglBrowserSetCursor(view->impl->id, (int)cursor) ? PUGL_SUCCESS\n                                                           : PUGL_FAILURE;",
+                  "  return puglBrowserSetCursor(view->impl->canvasSelector, (int)cursor)\n           ? PUGL_SUCCESS\n           : PUGL_FAILURE;",
+              ),
+          ]
+
+          changed = False
+          for old, new in replacements:
+              if old in text:
+                  text = text.replace(old, new, 1)
+                  changed = True
+              elif new not in text:
+                  raise SystemExit(f'expected source fragment not found: {old[:80]!r}')
+
+          if not changed:
+              raise SystemExit('browser semantics correction was already applied')
+
+          path.write_text(text)
+          PY
+
+          git rm .github/workflows/apply-browser-semantics-patch.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/emscripten.c
+          git commit -m 'Fix browser cursor lookup and DOM embedding'
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:feature/emscripten-browser-semantics; then
+              exit 0
+            fi
+            echo "Push raced with branch sanitation (attempt ${attempt}); rebasing on sanitized head"
+            git fetch origin feature/emscripten-browser-semantics
+            git rebase origin/feature/emscripten-browser-semantics
+          done
+          exit 1
