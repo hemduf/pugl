@@ -33,41 +33,34 @@ jobs:
           path = Path('test/wasm/test_browser_semantics.c')
           text = path.read_text()
 
-          marker = """EM_JS(void, puglTestDestroyHost, (uintptr_t nativeView), {\n  const host = document.querySelector(\n    `[data-pugl-native-view=\\\"${nativeView}\\\"]`);\n  if (host) {\n    host.remove();\n  }\n});\n\n"""
           helper = """static PuglStatus\npuglTestIgnoreEvent(PuglView* const view, const PuglEvent* const event)\n{\n  (void)view;\n  (void)event;\n  return PUGL_SUCCESS;\n}\n\n"""
+          insertion = "static bool\npuglTestBrowserCursorContract(void)"
           if helper not in text:
-              if marker not in text:
+              if insertion not in text:
                   raise SystemExit('test helper insertion point not found')
-              text = text.replace(marker, marker + helper, 1)
+              text = text.replace(insertion, helper + insertion, 1)
 
-          replacements = [
+          pairs = [
               (
                   "  puglSetBackend(view, puglStubBackend());\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);",
                   "  puglSetBackend(view, puglStubBackend());\n  puglSetEventFunc(view, puglTestIgnoreEvent);\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);",
-                  2,
               ),
               (
                   "  puglSetBackend(view0, puglStubBackend());\n  puglSetBackend(view1, puglStubBackend());\n  puglSetSizeHint(view0, PUGL_DEFAULT_SIZE, 16U, 16U);",
                   "  puglSetBackend(view0, puglStubBackend());\n  puglSetBackend(view1, puglStubBackend());\n  puglSetEventFunc(view0, puglTestIgnoreEvent);\n  puglSetEventFunc(view1, puglTestIgnoreEvent);\n  puglSetSizeHint(view0, PUGL_DEFAULT_SIZE, 16U, 16U);",
-                  1,
               ),
               (
                   "  puglSetBackend(view, puglStubBackend());\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 48U, 24U);",
                   "  puglSetBackend(view, puglStubBackend());\n  puglSetEventFunc(view, puglTestIgnoreEvent);\n  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 48U, 24U);",
-                  1,
               ),
               (
                   "    puglSetBackend(missingView, puglStubBackend());\n    puglSetSizeHint(missingView, PUGL_DEFAULT_SIZE, 16U, 16U);",
                   "    puglSetBackend(missingView, puglStubBackend());\n    puglSetEventFunc(missingView, puglTestIgnoreEvent);\n    puglSetSizeHint(missingView, PUGL_DEFAULT_SIZE, 16U, 16U);",
-                  1,
               ),
           ]
 
-          for old, new, expected in replacements:
-              count = text.count(old)
-              if count:
-                  if count != expected:
-                      raise SystemExit(f'unexpected match count {count} for {old[:60]!r}, expected {expected}')
+          for old, new in pairs:
+              if old in text:
                   text = text.replace(old, new)
               elif new not in text:
                   raise SystemExit(f'expected test fragment not found: {old[:80]!r}')
