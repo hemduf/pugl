@@ -19,6 +19,42 @@ EM_JS(int,
          getComputedStyle(element).cursor === UTF8ToString(expected);
 });
 
+EM_JS(int, puglTestCreateHost, (uintptr_t nativeView), {
+  const selector = `[data-pugl-native-view="${nativeView}"]`;
+  if (!nativeView || document.querySelector(selector)) {
+    return 0;
+  }
+
+  const host = document.createElement('div');
+  host.id = `pugl-host-${nativeView}`;
+  host.dataset.puglNativeView = String(nativeView);
+  host.style.position = 'relative';
+  document.body.appendChild(host);
+  return 1;
+});
+
+EM_JS(int,
+      puglTestNativeViewHasParent,
+      (uintptr_t nativeView, uintptr_t parentView), {
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  const parent = document.querySelector(
+    `[data-pugl-native-view="${parentView}"]`);
+  return !!element && !!parent && element.parentElement === parent;
+});
+
+EM_JS(int, puglTestHostExists, (uintptr_t nativeView), {
+  return !!document.querySelector(
+    `[data-pugl-native-view="${nativeView}"]`);
+});
+
+EM_JS(void, puglTestDestroyHost, (uintptr_t nativeView), {
+  const host = document.querySelector(
+    `[data-pugl-native-view="${nativeView}"]`);
+  if (host) {
+    host.remove();
+  }
+});
+
 static bool
 puglTestBrowserCursorContract(void)
 {
@@ -105,13 +141,148 @@ puglTestUnsupportedDesktopWindowContract(void)
   return explicitSemantics;
 }
 
+static bool
+puglTestNativeViewIdentityContract(void)
+{
+  PuglWorld* const world0 = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglWorld* const world1 = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const view0 = world0 ? puglNewView(world0) : NULL;
+  PuglView* const view1 = world1 ? puglNewView(world1) : NULL;
+
+  if (!world0 || !world1 || !view0 || !view1) {
+    if (view0) {
+      puglFreeView(view0);
+    }
+    if (view1) {
+      puglFreeView(view1);
+    }
+    if (world0) {
+      puglFreeWorld(world0);
+    }
+    if (world1) {
+      puglFreeWorld(world1);
+    }
+    return false;
+  }
+
+  puglSetBackend(view0, puglStubBackend());
+  puglSetBackend(view1, puglStubBackend());
+  puglSetSizeHint(view0, PUGL_DEFAULT_SIZE, 16U, 16U);
+  puglSetSizeHint(view1, PUGL_DEFAULT_SIZE, 16U, 16U);
+
+  const bool realized0 = puglShow(view0, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
+  const bool realized1 = puglShow(view1, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
+  const PuglNativeView native0 = puglGetNativeView(view0);
+  const PuglNativeView native1 = puglGetNativeView(view1);
+  const bool unique = realized0 && realized1 && native0 && native1 &&
+                      native0 != native1 &&
+                      puglGetNativeView(view0) == native0 &&
+                      puglGetNativeView(view1) == native1;
+
+  if (realized0) {
+    (void)puglUnrealize(view0);
+  }
+  if (realized1) {
+    (void)puglUnrealize(view1);
+  }
+  puglFreeView(view0);
+  puglFreeView(view1);
+  puglFreeWorld(world0);
+  puglFreeWorld(world1);
+
+  if (!unique) {
+    fprintf(stderr,
+            "Browser native view handles must be globally unique: %lu vs %lu\n",
+            (unsigned long)native0,
+            (unsigned long)native1);
+  }
+
+  return unique;
+}
+
+static bool
+puglTestBrowserEmbeddingContract(void)
+{
+  const PuglNativeView parent = (PuglNativeView)0x1F00DU;
+  if (!puglTestCreateHost(parent)) {
+    fprintf(stderr, "Failed to create browser embedding host\n");
+    return false;
+  }
+
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const  view  = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    puglTestDestroyHost(parent);
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 48U, 24U);
+  const PuglStatus parentStatus = puglSetParent(view, parent);
+  const PuglStatus realizeStatus = puglShow(view, PUGL_SHOW_PASSIVE);
+  const PuglNativeView nativeView = puglGetNativeView(view);
+
+  const bool embedded =
+    parentStatus == PUGL_SUCCESS && realizeStatus == PUGL_SUCCESS && nativeView &&
+    puglGetParent(view) == parent &&
+    puglTestNativeViewHasParent(nativeView, parent);
+
+  const PuglStatus unrealizeStatus =
+    nativeView ? puglUnrealize(view) : PUGL_FAILURE;
+  const bool cleanTeardown = unrealizeStatus == PUGL_SUCCESS &&
+                             puglGetNativeView(view) == 0U &&
+                             puglTestHostExists(parent);
+
+  puglFreeView(view);
+  puglFreeWorld(world);
+  puglTestDestroyHost(parent);
+
+  PuglWorld* const missingWorld = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const missingView =
+    missingWorld ? puglNewView(missingWorld) : NULL;
+  bool missingParentRejected = false;
+  if (missingWorld && missingView) {
+    puglSetBackend(missingView, puglStubBackend());
+    puglSetSizeHint(missingView, PUGL_DEFAULT_SIZE, 16U, 16U);
+    (void)puglSetParent(missingView, (PuglNativeView)0xDEADU);
+    missingParentRejected =
+      puglShow(missingView, PUGL_SHOW_PASSIVE) == PUGL_REALIZE_FAILED &&
+      puglGetNativeView(missingView) == 0U;
+  }
+
+  if (missingView) {
+    puglFreeView(missingView);
+  }
+  if (missingWorld) {
+    puglFreeWorld(missingWorld);
+  }
+
+  if (!embedded || !cleanTeardown || !missingParentRejected) {
+    fprintf(stderr,
+            "Browser embedding contract failed: embedded=%d teardown=%d missing=%d\n",
+            embedded,
+            cleanTeardown,
+            missingParentRejected);
+  }
+
+  return embedded && cleanTeardown && missingParentRejected;
+}
+
 static void
 puglRunBrowserSemantics(void* const data)
 {
   (void)data;
 
   if (!puglTestBrowserCursorContract() ||
-      !puglTestUnsupportedDesktopWindowContract()) {
+      !puglTestUnsupportedDesktopWindowContract() ||
+      !puglTestNativeViewIdentityContract() ||
+      !puglTestBrowserEmbeddingContract()) {
     emscripten_run_script(
       "throw new Error('Browser platform semantics contract failed')");
   }
