@@ -5,6 +5,7 @@
 #include <pugl/stub.h>
 
 #include <emscripten.h>
+#include <emscripten/html5.h>
 
 #include <stdbool.h>
 #include <stdint.h>
