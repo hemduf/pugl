@@ -12,6 +12,7 @@ project(
 include(CTest)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+include(CheckCSourceCompiles)
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(PUGL_BUILD_STUB "Build the stub graphics backend" ON)
@@ -20,6 +21,7 @@ option(PUGL_BUILD_CAIRO "Build the Cairo graphics backend when available" ON)
 option(PUGL_BUILD_VULKAN "Build the Vulkan graphics backend when available" ON)
 option(PUGL_BUILD_TESTS "Build CMake smoke tests" ${PROJECT_IS_TOP_LEVEL})
 option(PUGL_INSTALL "Install Pugl and its CMake package" ${PROJECT_IS_TOP_LEVEL})
+option(PUGL_WIN_WCHAR "Use UNICODE with Win32" ON)
 option(PUGL_XCURSOR "Use Xcursor when available" ON)
 option(PUGL_XRANDR "Use Xrandr when available" ON)
 option(PUGL_XSYNC "Use XSync when available" ON)
@@ -100,6 +102,14 @@ elseif(WIN32)
     NOMCX
   )
 
+  if(PUGL_WIN_WCHAR)
+    list(APPEND pugl_platform_compile_definitions UNICODE _UNICODE)
+  endif()
+
+  if(MSVC)
+    list(APPEND pugl_platform_compile_definitions NOTEXTMETRIC)
+  endif()
+
   list(APPEND pugl_platform_link_libraries
     dwmapi
     gdi32
@@ -136,12 +146,27 @@ else()
   endif()
 
   set(PUGL_USE_XSYNC 0)
-  if(PUGL_XSYNC AND X11_Xext_FOUND AND X11_XSync_FOUND)
-    set(PUGL_USE_XSYNC 1)
-    if(TARGET X11::Xext)
-      list(APPEND pugl_platform_link_libraries X11::Xext)
-    else()
-      list(APPEND pugl_platform_link_libraries ${X11_Xext_LIB})
+  if(PUGL_XSYNC AND X11_Xext_FOUND)
+    set(_pugl_required_includes "${CMAKE_REQUIRED_INCLUDES}")
+    set(_pugl_required_libraries "${CMAKE_REQUIRED_LIBRARIES}")
+    set(CMAKE_REQUIRED_INCLUDES "${X11_INCLUDE_DIR}")
+    set(CMAKE_REQUIRED_LIBRARIES "${X11_X11_LIB};${X11_Xext_LIB}")
+    check_c_source_compiles(
+      "#include <X11/Xlib.h>\n#include <X11/extensions/sync.h>\nint main(void) { int a = 0; int b = 0; XSyncQueryExtension((Display*)0, &a, &b); return 0; }"
+      PUGL_XSYNC_WORKS
+    )
+    set(CMAKE_REQUIRED_INCLUDES "${_pugl_required_includes}")
+    set(CMAKE_REQUIRED_LIBRARIES "${_pugl_required_libraries}")
+    unset(_pugl_required_includes)
+    unset(_pugl_required_libraries)
+
+    if(PUGL_XSYNC_WORKS)
+      set(PUGL_USE_XSYNC 1)
+      if(TARGET X11::Xext)
+        list(APPEND pugl_platform_link_libraries X11::Xext)
+      else()
+        list(APPEND pugl_platform_link_libraries ${X11_Xext_LIB})
+      endif()
     endif()
   endif()
 
