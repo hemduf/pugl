@@ -18,14 +18,20 @@ EM_JS(int,
          getComputedStyle(element).cursor === UTF8ToString(expected);
 });
 
-__attribute__((constructor)) static void
+static bool
 puglTestBrowserCursorContract(void)
 {
   PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
   PuglView* const  view  = world ? puglNewView(world) : NULL;
   if (!world || !view) {
     fprintf(stderr, "Browser cursor test setup failed\n");
-    return;
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
   }
 
   puglSetBackend(view, puglStubBackend());
@@ -48,19 +54,25 @@ puglTestBrowserCursorContract(void)
     fprintf(stderr,
             "Browser cursor mapping contract is not implemented: status=%d\n",
             (int)cursorStatus);
-    emscripten_run_script(
-      "throw new Error('Browser cursor mapping contract is not implemented')");
   }
+
+  return cursorMatches;
 }
 
-__attribute__((constructor)) static void
+static bool
 puglTestUnsupportedDesktopWindowContract(void)
 {
   PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
   PuglView* const  view  = world ? puglNewView(world) : NULL;
   if (!world || !view) {
     fprintf(stderr, "Browser desktop-window semantics test setup failed\n");
-    return;
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
   }
 
   puglSetBackend(view, puglStubBackend());
@@ -80,13 +92,36 @@ puglTestUnsupportedDesktopWindowContract(void)
   puglFreeView(view);
   puglFreeWorld(world);
 
-  if (positionStatus != PUGL_UNSUPPORTED ||
-      transientStatus != PUGL_UNSUPPORTED) {
+  const bool explicitSemantics =
+    positionStatus == PUGL_UNSUPPORTED && transientStatus == PUGL_UNSUPPORTED;
+  if (!explicitSemantics) {
     fprintf(stderr,
             "Browser desktop-only APIs must be explicit: position=%d transient=%d\n",
             (int)positionStatus,
             (int)transientStatus);
-    emscripten_run_script(
-      "throw new Error('Browser desktop-only API contract is not explicit')");
   }
+
+  return explicitSemantics;
+}
+
+static void
+puglRunBrowserSemantics(void* const data)
+{
+  (void)data;
+
+  if (!puglTestBrowserCursorContract() ||
+      !puglTestUnsupportedDesktopWindowContract()) {
+    emscripten_run_script(
+      "throw new Error('Browser platform semantics contract failed')");
+  }
+}
+
+__attribute__((constructor)) static void
+puglScheduleBrowserSemantics(void)
+{
+  // C constructors run before Emscripten enters the page event loop, so defer
+  // DOM-dependent view realization until after main() and the document body
+  // are available.  Any failure is still surfaced as an uncaught page error by
+  // the existing headless browser runner.
+  emscripten_set_timeout(puglRunBrowserSemantics, 0.0, NULL);
 }
