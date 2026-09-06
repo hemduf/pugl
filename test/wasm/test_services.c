@@ -21,12 +21,14 @@ typedef struct {
   unsigned   timer7Events;
   unsigned   timer9Events;
   unsigned   teardownTimerEvents;
+  unsigned   timer7AtFailedRestart;
   unsigned   timer7AtStop;
   unsigned   timer9AtStop;
   unsigned   clipboardOffers;
   unsigned   clipboardDataEvents;
   unsigned   clipboardWritePolls;
   bool       clientOrderOk;
+  bool       timer7ReplacementFailureOk;
   bool       timer7Restarted;
   bool       clipboardOfferOk;
   bool       clipboardDataOk;
@@ -277,13 +279,51 @@ requestPaste(void* const data)
 }
 
 static void
+failTimer7Replacement(void* const data)
+{
+  (void)data;
+
+  if (!state.view || state.timer7Events < 2U) {
+    finish(false);
+    return;
+  }
+
+  state.timer7AtFailedRestart = state.timer7Events;
+  const int injected = emscripten_run_script_int(
+    "(()=>{if(typeof globalThis==='undefined'||"
+    "typeof globalThis.setInterval!=='function')return 0;"
+    "globalThis.__puglOriginalSetInterval=globalThis.setInterval;"
+    "globalThis.setInterval=()=>0;return 1;})()");
+
+  const PuglStatus status =
+    injected ? puglStartTimer(state.view, 7U, 0.005) : PUGL_FAILURE;
+
+  emscripten_run_script(
+    "(()=>{if(globalThis.__puglOriginalSetInterval){"
+    "globalThis.setInterval=globalThis.__puglOriginalSetInterval;"
+    "delete globalThis.__puglOriginalSetInterval;}})()");
+
+  state.timer7ReplacementFailureOk =
+    injected && status == PUGL_UNKNOWN_ERROR;
+  if (!state.timer7ReplacementFailureOk) {
+    fprintf(stderr, "Failed timer replacement was not reported correctly\n");
+    finish(false);
+  }
+}
+
+static void
 restartTimer7(void* const data)
 {
   (void)data;
 
   state.timer7AtStop = state.timer7Events;
-  if (!state.view || state.timer7AtStop < 2U || puglStopTimer(state.view, 7U) ||
-      puglStartTimer(state.view, 7U, 0.015)) {
+  if (!state.view || !state.timer7ReplacementFailureOk ||
+      state.timer7AtStop <= state.timer7AtFailedRestart ||
+      puglStopTimer(state.view, 7U) || puglStartTimer(state.view, 7U, 0.015)) {
+    fprintf(stderr,
+            "Existing timer did not survive failed replacement: before=%u after=%u\n",
+            state.timer7AtFailedRestart,
+            state.timer7AtStop);
     finish(false);
     return;
   }
@@ -314,8 +354,9 @@ finishServices(void* const data)
 
   const bool pass =
     state.view && state.clientEvents == 1U && state.clientOrderOk &&
-    state.timer7Restarted && state.timer7Events > state.timer7AtStop &&
-    state.timer9AtStop >= 3U && state.timer9Events == state.timer9AtStop &&
+    state.timer7ReplacementFailureOk && state.timer7Restarted &&
+    state.timer7Events > state.timer7AtStop && state.timer9AtStop >= 3U &&
+    state.timer9Events == state.timer9AtStop &&
     state.teardownTimerEvents == 0U && state.clipboardOffers == 1U &&
     state.clipboardDataEvents == 1U && state.clipboardOfferOk &&
     state.clipboardDataOk && state.clipboardSecurityOk && writeDenied &&
@@ -323,13 +364,16 @@ finishServices(void* const data)
 
   if (!pass) {
     fprintf(stderr,
-            "Service checks failed: client=%u order=%d timer7=%u stop7=%u "
-            "restart=%d timer9=%u stop9=%u teardown=%u offers=%u data=%u "
-            "offerOk=%d dataOk=%d securityOk=%d writeDenied=%d readDenied=%d\n",
+            "Service checks failed: client=%u order=%d timer7=%u failed7=%u "
+            "stop7=%u failOk=%d restart=%d timer9=%u stop9=%u teardown=%u "
+            "offers=%u data=%u offerOk=%d dataOk=%d securityOk=%d "
+            "writeDenied=%d readDenied=%d\n",
             state.clientEvents,
             state.clientOrderOk,
             state.timer7Events,
+            state.timer7AtFailedRestart,
             state.timer7AtStop,
+            state.timer7ReplacementFailureOk,
             state.timer7Restarted,
             state.timer9Events,
             state.timer9AtStop,
@@ -397,8 +441,9 @@ main(void)
   }
 
   emscripten_set_timeout(requestPaste, 0.0, NULL);
-  emscripten_set_timeout(restartTimer7, 70.0, NULL);
+  emscripten_set_timeout(failTimer7Replacement, 70.0, NULL);
   emscripten_set_timeout(stopTimer9, 100.0, NULL);
+  emscripten_set_timeout(restartTimer7, 150.0, NULL);
   emscripten_set_timeout(finishServices, 600.0, NULL);
   return 0;
 }
