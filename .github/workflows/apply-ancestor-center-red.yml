@@ -1,0 +1,132 @@
+name: Apply ancestor center RED test
+
+on:
+  push:
+    branches: [feature/emscripten-browser-semantics]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-ancestor-center-red
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/emscripten-browser-semantics
+          fetch-depth: 0
+
+      - name: Add browser ancestor-center contract test
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/emscripten-browser-semantics
+          git checkout -B feature/emscripten-browser-semantics origin/feature/emscripten-browser-semantics
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('test/wasm/test_browser_semantics.c')
+          text = path.read_text()
+
+          js_helper = r'''EM_JS(int,
+      puglTestCanvasIsViewportCentered,
+      (uintptr_t nativeView, unsigned width, unsigned height), {
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  if (!element || typeof window === 'undefined') {
+    return 0;
+  }
+
+  const left = Number.parseInt(element.style.left, 10);
+  const top = Number.parseInt(element.style.top, 10);
+  const expectedLeft = Math.trunc(window.innerWidth / 2) - Math.trunc(width / 2);
+  const expectedTop = Math.trunc(window.innerHeight / 2) - Math.trunc(height / 2);
+  return left === expectedLeft && top === expectedTop;
+});
+
+'''
+          js_marker = 'EM_JS(int, puglTestCreateHost, (uintptr_t nativeView), {'
+          if js_helper not in text:
+              if js_marker not in text:
+                  raise SystemExit('ancestor center JS insertion point not found')
+              text = text.replace(js_marker, js_helper + js_marker, 1)
+
+          test_func = r'''static bool
+puglTestAncestorCenterContract(void)
+{
+  static const unsigned width = 40U;
+  static const unsigned height = 20U;
+
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const view = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreEvent);
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, width, height);
+
+  const bool realized = puglShow(view, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
+  const PuglNativeView nativeView = puglGetNativeView(view);
+  const bool centered = realized && nativeView &&
+                        puglTestCanvasIsViewportCentered(nativeView, width, height);
+
+  if (realized) {
+    (void)puglUnrealize(view);
+  }
+  puglFreeView(view);
+  puglFreeWorld(world);
+
+  if (!centered) {
+    fprintf(stderr, "Browser ancestor center must be the viewport center point\n");
+  }
+
+  return centered;
+}
+
+'''
+          test_marker = 'static void\npuglRunBrowserSemantics(void* const data)'
+          if test_func not in text:
+              if test_marker not in text:
+                  raise SystemExit('ancestor center test insertion point not found')
+              text = text.replace(test_marker, test_func + test_marker, 1)
+
+          old_chain = '''      !puglTestNativeViewIdentityContract() ||
+      !puglTestBrowserEmbeddingContract()) {'''
+          new_chain = '''      !puglTestNativeViewIdentityContract() ||
+      !puglTestBrowserEmbeddingContract() ||
+      !puglTestAncestorCenterContract()) {'''
+          if old_chain in text:
+              text = text.replace(old_chain, new_chain, 1)
+          elif new_chain not in text:
+              raise SystemExit('ancestor center test chain insertion point not found')
+
+          path.write_text(text)
+          PY
+
+          git rm .github/workflows/apply-ancestor-center-red.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add test/wasm/test_browser_semantics.c
+          git commit -m 'Test browser ancestor center semantics'
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:feature/emscripten-browser-semantics; then
+              exit 0
+            fi
+            git fetch origin feature/emscripten-browser-semantics
+            git rebase origin/feature/emscripten-browser-semantics
+          done
+          exit 1
