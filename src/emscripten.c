@@ -3,6 +3,7 @@
 
 #include "emscripten_platform.h"
 
+#include "emscripten_events.h"
 #include "internal.h"
 #include "platform.h"
 #include "types.h"
@@ -62,7 +63,7 @@ EM_JS(int,
         host.style.display = 'none';
         host.style.height = `${height}px`;
         host.style.left = `${x}px`;
-        host.style.position = parent ? 'absolute' : 'absolute';
+        host.style.position = 'absolute';
         host.style.top = `${y}px`;
         host.style.width = `${width}px`;
 
@@ -280,6 +281,9 @@ puglFreeViewInternals(PuglView* const view)
   if (view && view->impl) {
     if (view->impl->id) {
       (void)puglUnrealize(view);
+    } else {
+      puglEmscriptenClearTimers(view);
+      puglEmscriptenClearClipboard(view);
     }
     free(view->impl);
   }
@@ -355,6 +359,13 @@ puglRealize(PuglView* const view)
     return st;
   }
 
+  if ((st = puglEmscriptenRegisterCallbacks(view))) {
+    view->backend->destroy(view);
+    puglDestroyDomView((unsigned)impl->id);
+    impl->id = 0U;
+    return st;
+  }
+
   if (view->strings[PUGL_WINDOW_TITLE]) {
     puglSetDomTitle((unsigned)impl->id, view->strings[PUGL_WINDOW_TITLE]);
   }
@@ -371,6 +382,9 @@ puglUnrealize(PuglView* const view)
   }
 
   const PuglStatus st = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
+  puglEmscriptenUnregisterCallbacks(view);
+  puglEmscriptenClearTimers(view);
+  puglEmscriptenClearClipboard(view);
   view->backend->destroy(view);
   puglDestroyDomView((unsigned)impl->id);
 
@@ -459,18 +473,13 @@ puglHasFocus(const PuglView* const view)
 PuglStatus
 puglStartTimer(PuglView* const view, const uintptr_t id, const double timeout)
 {
-  (void)view;
-  (void)id;
-  (void)timeout;
-  return PUGL_UNSUPPORTED;
+  return puglEmscriptenStartTimer(view, id, timeout);
 }
 
 PuglStatus
 puglStopTimer(PuglView* const view, const uintptr_t id)
 {
-  (void)view;
-  (void)id;
-  return PUGL_UNSUPPORTED;
+  return puglEmscriptenStopTimer(view, id);
 }
 
 PuglStatus
@@ -509,7 +518,15 @@ puglUpdate(PuglWorld* const world, const double timeout)
 
   for (size_t i = 0U; i < world->numViews; ++i) {
     PuglView* const view = world->views[i];
-    if (!view || !view->impl->id || !view->impl->mapped) {
+    if (!view || !view->impl->id) {
+      continue;
+    }
+
+    if ((st = puglEmscriptenPollClipboard(view))) {
+      break;
+    }
+
+    if (!view->impl->mapped) {
       continue;
     }
 
@@ -636,7 +653,11 @@ puglSetWindowSize(PuglView* const view,
     return PUGL_FAILURE;
   }
 
-  const PuglPoint pos = puglGetPositionHint(view, PUGL_CURRENT_POSITION);
+  const PuglPoint pos =
+    view->lastConfigure.type == PUGL_CONFIGURE
+      ? (PuglPoint){view->lastConfigure.x, view->lastConfigure.y}
+      : puglGetInitialPosition(view, (PuglArea){(PuglSpan)width, (PuglSpan)height});
+
   puglSetDomGeometry((unsigned)view->impl->id, pos.x, pos.y, width, height);
 
   if (view->lastConfigure.type == PUGL_CONFIGURE) {
@@ -672,15 +693,14 @@ puglAcceptOffer(PuglView* const                 view,
                 const unsigned                  regionWidth,
                 const unsigned                  regionHeight)
 {
-  (void)view;
-  (void)offer;
-  (void)typeIndex;
-  (void)action;
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-  return PUGL_UNSUPPORTED;
+  return puglEmscriptenAcceptOffer(view,
+                                   offer,
+                                   typeIndex,
+                                   action,
+                                   regionX,
+                                   regionY,
+                                   regionWidth,
+                                   regionHeight);
 }
 
 PuglStatus
@@ -691,20 +711,14 @@ puglRejectOffer(PuglView* const                 view,
                 const unsigned                  regionWidth,
                 const unsigned                  regionHeight)
 {
-  (void)view;
-  (void)offer;
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-  return PUGL_UNSUPPORTED;
+  return puglEmscriptenRejectOffer(
+    view, offer, regionX, regionY, regionWidth, regionHeight);
 }
 
 PuglStatus
 puglPaste(PuglView* const view)
 {
-  (void)view;
-  return PUGL_UNSUPPORTED;
+  return puglEmscriptenPaste(view);
 }
 
 PuglStatus
@@ -719,9 +733,7 @@ uint32_t
 puglGetNumClipboardTypes(const PuglView* const view,
                          const PuglClipboard   clipboard)
 {
-  (void)view;
-  (void)clipboard;
-  return 0U;
+  return puglEmscriptenGetNumClipboardTypes(view, clipboard);
 }
 
 const char*
@@ -729,10 +741,7 @@ puglGetClipboardType(const PuglView* const view,
                      const PuglClipboard   clipboard,
                      const uint32_t        typeIndex)
 {
-  (void)view;
-  (void)clipboard;
-  (void)typeIndex;
-  return NULL;
+  return puglEmscriptenGetClipboardType(view, clipboard, typeIndex);
 }
 
 PuglStatus
@@ -742,12 +751,7 @@ puglSetClipboard(PuglView* const     view,
                  const void* const   data,
                  const size_t        len)
 {
-  (void)view;
-  (void)clipboard;
-  (void)type;
-  (void)data;
-  (void)len;
-  return PUGL_UNSUPPORTED;
+  return puglEmscriptenSetClipboard(view, clipboard, type, data, len);
 }
 
 const void*
@@ -756,13 +760,7 @@ puglGetClipboard(PuglView* const     view,
                  const uint32_t      typeIndex,
                  size_t* const       len)
 {
-  (void)view;
-  (void)clipboard;
-  (void)typeIndex;
-  if (len) {
-    *len = 0U;
-  }
-  return NULL;
+  return puglEmscriptenGetClipboard(view, clipboard, typeIndex, len);
 }
 
 PuglStatus
