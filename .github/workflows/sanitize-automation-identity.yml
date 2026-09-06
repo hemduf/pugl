@@ -1,0 +1,99 @@
+name: Sanitize automation commit identity
+
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: sanitize-automation-history
+  cancel-in-progress: false
+
+jobs:
+  sanitize:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Rewrite repository-owner commit metadata
+        shell: bash
+        env:
+          FILTER_BRANCH_SQUELCH_WARNING: '1'
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          OWNER_LOGIN: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+
+          sanitize_ref() {
+            local branch="$1"
+            local source_ref="refs/remotes/origin/$branch"
+
+            if ! git show-ref --verify --quiet "$source_ref"; then
+              echo "Skipping missing branch: $branch"
+              return 0
+            fi
+
+            local original_tip
+            original_tip="$(git rev-parse "$source_ref")"
+
+            local found=0
+            while IFS=$'\t' read -r author_name _author_email committer_name _committer_email; do
+              if [[ "$author_name" == "$OWNER_LOGIN" || "$committer_name" == "$OWNER_LOGIN" ]]; then
+                found=1
+                break
+              fi
+            done < <(git log "$original_tip" --format='%an%x09%ae%x09%cn%x09%ce')
+
+            if [[ "$found" -eq 0 ]]; then
+              echo "No repository-owner commit identity on $branch"
+              return 0
+            fi
+
+            git branch -f __sanitize_work "$original_tip"
+
+            git filter-branch --force --env-filter '
+              if [ "$GIT_AUTHOR_NAME" = "$OWNER_LOGIN" ]; then
+                export GIT_AUTHOR_NAME="github-actions[bot]"
+                export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+              fi
+
+              if [ "$GIT_COMMITTER_NAME" = "$OWNER_LOGIN" ]; then
+                export GIT_COMMITTER_NAME="github-actions[bot]"
+                export GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+              fi
+            ' -- __sanitize_work
+
+            local rewritten_tip
+            rewritten_tip="$(git rev-parse __sanitize_work)"
+
+            while IFS=$'\t' read -r author_name _author_email committer_name _committer_email; do
+              if [[ "$author_name" == "$OWNER_LOGIN" || "$committer_name" == "$OWNER_LOGIN" ]]; then
+                echo "Refusing to push $branch: repository-owner identity remains" >&2
+                exit 1
+              fi
+            done < <(git log "$rewritten_tip" --format='%an%x09%ae%x09%cn%x09%ce')
+
+            git push --force origin "$rewritten_tip:refs/heads/$branch"
+            git update-ref -d refs/original/refs/heads/__sanitize_work || true
+            git branch -D __sanitize_work
+          }
+
+          if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
+            sanitize_ref "$PR_HEAD_REF"
+          else
+            sanitize_ref main
+          fi
