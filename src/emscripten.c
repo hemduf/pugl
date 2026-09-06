@@ -10,11 +10,118 @@
 #include <pugl/pugl.h>
 
 #include <emscripten.h>
+#include <emscripten/html5.h>
 
+#include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static PuglCoord
+puglClampCoord(const int value)
+{
+  return (PuglCoord)(value < INT16_MIN   ? INT16_MIN
+                     : value > INT16_MAX ? INT16_MAX
+                                         : value);
+}
+
+static bool
+puglCreateDomView(const PuglView* const view,
+                  const PuglPoint       position,
+                  const PuglArea        size)
+{
+  char script[1024] = {0};
+  snprintf(script,
+           sizeof(script),
+           "(()=>{if(typeof document==='undefined'||!document.body)return 0;"
+           "const id='pugl-view-%" PRIuPTR "';"
+           "if(document.getElementById(id))return 0;"
+           "const e=document.createElement('canvas');"
+           "e.id=id;e.dataset.puglView='%" PRIuPTR "';e.tabIndex=0;"
+           "e.style.boxSizing='border-box';e.style.display='none';"
+           "e.style.position='absolute';e.style.left='%dpx';e.style.top='%dpx';"
+           "e.style.width='%upx';e.style.height='%upx';e.style.outline='none';"
+           "const r=(typeof window!=='undefined'&&window.devicePixelRatio>0)"
+           "?window.devicePixelRatio:1;"
+           "e.width=Math.max(1,Math.round(%u*r));"
+           "e.height=Math.max(1,Math.round(%u*r));"
+           "document.body.appendChild(e);return 1;})()",
+           view->impl->id,
+           view->impl->id,
+           position.x,
+           position.y,
+           size.width,
+           size.height,
+           size.width,
+           size.height);
+  return emscripten_run_script_int(script) != 0;
+}
+
+static void
+puglDestroyDomView(const uintptr_t id)
+{
+  char script[256] = {0};
+  snprintf(script,
+           sizeof(script),
+           "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+           "');if(e)e.remove();})()",
+           id);
+  emscripten_run_script(script);
+}
+
+static void
+puglSetDomVisible(const uintptr_t id, const bool visible)
+{
+  char script[256] = {0};
+  snprintf(script,
+           sizeof(script),
+           "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+           "');if(e)e.style.display='%s';})()",
+           id,
+           visible ? "block" : "none");
+  emscripten_run_script(script);
+}
+
+static void
+puglSetDomGeometry(const PuglView* const view,
+                   const PuglPoint       position,
+                   const unsigned        width,
+                   const unsigned        height)
+{
+  char script[768] = {0};
+  snprintf(script,
+           sizeof(script),
+           "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+           "');if(!e)return;"
+           "e.style.left='%dpx';e.style.top='%dpx';"
+           "e.style.width='%upx';e.style.height='%upx';"
+           "const r=(typeof window!=='undefined'&&window.devicePixelRatio>0)"
+           "?window.devicePixelRatio:1;"
+           "e.width=Math.max(1,Math.round(%u*r));"
+           "e.height=Math.max(1,Math.round(%u*r));})()",
+           view->impl->id,
+           position.x,
+           position.y,
+           width,
+           height,
+           width,
+           height);
+  emscripten_run_script(script);
+}
+
+static int
+puglGetBrowserDimension(const char* const name)
+{
+  char script[128] = {0};
+  snprintf(script,
+           sizeof(script),
+           "typeof window==='undefined'?0:Math.round(window.%s/2)",
+           name);
+  return emscripten_run_script_int(script);
+}
 
 static PuglStatus
 puglDispatchConfigure(PuglView* const view, const PuglViewStyleFlags style)
@@ -24,6 +131,7 @@ puglDispatchConfigure(PuglView* const view, const PuglViewStyleFlags style)
   PuglEvent       event = {0};
 
   event.configure.type   = PUGL_CONFIGURE;
+  event.configure.flags  = 0U;
   event.configure.x      = point.x;
   event.configure.y      = point.y;
   event.configure.width  = size.width;
@@ -31,6 +139,38 @@ puglDispatchConfigure(PuglView* const view, const PuglViewStyleFlags style)
   event.configure.style  = style;
 
   return puglDispatchEvent(view, &event);
+}
+
+static PuglArea
+puglCurrentArea(const PuglView* const view)
+{
+  return view->lastConfigure.type == PUGL_CONFIGURE
+           ? (PuglArea){view->lastConfigure.width, view->lastConfigure.height}
+           : puglGetInitialSize(view);
+}
+
+static void
+puglMergeExpose(PuglExposeEvent* const       pending,
+                const PuglExposeEvent* const event)
+{
+  if (pending->type != PUGL_EXPOSE) {
+    *pending = *event;
+    return;
+  }
+
+  const int left   = event->x < pending->x ? event->x : pending->x;
+  const int top    = event->y < pending->y ? event->y : pending->y;
+  const int right0 = pending->x + pending->width;
+  const int right1 = event->x + event->width;
+  const int bottom0 = pending->y + pending->height;
+  const int bottom1 = event->y + event->height;
+  const int right  = right1 > right0 ? right1 : right0;
+  const int bottom = bottom1 > bottom0 ? bottom1 : bottom0;
+
+  pending->x      = (PuglCoord)left;
+  pending->y      = (PuglCoord)top;
+  pending->width  = (PuglSpan)(right - left);
+  pending->height = (PuglSpan)(bottom - top);
 }
 
 PuglWorldInternals*
@@ -42,7 +182,11 @@ puglInitWorldInternals(const PuglWorldType type, const PuglWorldFlags flags)
   PuglWorldInternals* const impl =
     (PuglWorldInternals*)calloc(1U, sizeof(PuglWorldInternals));
   if (impl) {
-    impl->nextViewId = 1U;
+    impl->nextViewId  = 1U;
+    impl->scaleFactor = emscripten_get_device_pixel_ratio();
+    if (impl->scaleFactor <= 0.0) {
+      impl->scaleFactor = 1.0;
+    }
   }
 
   return impl;
@@ -85,7 +229,9 @@ PuglPoint
 puglGetAncestorCenter(const PuglView* const view)
 {
   (void)view;
-  const PuglPoint center = {0, 0};
+  const PuglPoint center = {
+    puglClampCoord(puglGetBrowserDimension("innerWidth")),
+    puglClampCoord(puglGetBrowserDimension("innerHeight"))};
   return center;
 }
 
@@ -114,15 +260,30 @@ puglRealize(PuglView* const view)
     return st;
   }
 
+  const PuglArea  size = puglGetInitialSize(view);
+  const PuglPoint pos  = puglGetInitialPosition(view, size);
+
+  impl->id = view->world->impl->nextViewId++;
+  snprintf(impl->canvasSelector,
+           sizeof(impl->canvasSelector),
+           "#pugl-view-%" PRIuPTR,
+           impl->id);
+
+  if (!puglCreateDomView(view, pos, size)) {
+    impl->id = 0U;
+    return PUGL_REALIZE_FAILED;
+  }
+
   if ((st = view->backend->create(view))) {
-    view->backend->destroy(view);
+    puglDestroyDomView(impl->id);
+    impl->id = 0U;
     return st;
   }
 
-  impl->id = view->world->impl->nextViewId++;
-  st       = puglDispatchSimpleEvent(view, PUGL_REALIZE);
+  st = puglDispatchSimpleEvent(view, PUGL_REALIZE);
   if (st) {
     view->backend->destroy(view);
+    puglDestroyDomView(impl->id);
     impl->id = 0U;
   }
 
@@ -137,11 +298,14 @@ puglUnrealize(PuglView* const view)
     return PUGL_FAILURE;
   }
 
+  const uintptr_t id = impl->id;
   const PuglStatus st = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
   view->backend->destroy(view);
+  puglDestroyDomView(id);
 
-  impl->id     = 0U;
-  impl->mapped = false;
+  impl->id                = 0U;
+  impl->mapped            = false;
+  impl->canvasSelector[0] = '\0';
   memset(&impl->pendingExpose, 0, sizeof(impl->pendingExpose));
   memset(&view->lastConfigure, 0, sizeof(view->lastConfigure));
   return st;
@@ -164,7 +328,11 @@ puglShow(PuglView* const view, const PuglShowCommand command)
 
   if (!impl->mapped) {
     impl->mapped = true;
-    st           = puglDispatchConfigure(view, PUGL_VIEW_STYLE_MAPPED);
+    puglSetDomVisible(impl->id, true);
+    st = puglDispatchConfigure(view, PUGL_VIEW_STYLE_MAPPED);
+    if (!st) {
+      st = puglObscureView(view);
+    }
   }
 
   return st;
@@ -184,7 +352,8 @@ puglHide(PuglView* const view)
 
   if (impl->mapped) {
     impl->mapped = false;
-    return puglDispatchConfigure(view, 0U);
+    puglSetDomVisible(impl->id, false);
+    return puglDispatchConfigure(view, PUGL_VIEW_STYLE_HIDDEN);
   }
 
   return PUGL_SUCCESS;
@@ -243,8 +412,23 @@ puglSendEvent(PuglView* const view, const PuglEvent* const event)
     return PUGL_BAD_PARAMETER;
   }
 
-  return event->type == PUGL_CLIENT ? puglDispatchEvent(view, event)
-                                    : PUGL_UNSUPPORTED;
+  if (view->world->state == PUGL_WORLD_EXPOSING) {
+    return PUGL_BAD_CALL;
+  }
+
+  if (event->type == PUGL_CLIENT) {
+    return puglDispatchEvent(view, event);
+  }
+
+  if (event->type == PUGL_EXPOSE) {
+    return puglObscureRegion(view,
+                             event->expose.x,
+                             event->expose.y,
+                             event->expose.width,
+                             event->expose.height);
+  }
+
+  return PUGL_UNSUPPORTED;
 }
 
 PuglStatus
@@ -262,8 +446,16 @@ puglUpdate(PuglWorld* const world, const double timeout)
 
   for (size_t i = 0U; i < world->numViews && !st; ++i) {
     PuglView* const view = world->views[i];
-    if (view && view->impl->id && view->impl->mapped) {
-      st = puglDispatchSimpleEvent(view, PUGL_UPDATE);
+    if (!view || !view->impl->id || !view->impl->mapped) {
+      continue;
+    }
+
+    st = puglDispatchSimpleEvent(view, PUGL_UPDATE);
+    if (!st && view->impl->pendingExpose.type == PUGL_EXPOSE &&
+        view->stage == PUGL_VIEW_STAGE_CONFIGURED) {
+      const PuglEvent expose = view->impl->pendingExpose;
+      memset(&view->impl->pendingExpose, 0, sizeof(view->impl->pendingExpose));
+      st = puglDispatchEvent(view, &expose);
     }
   }
 
@@ -281,8 +473,12 @@ puglGetTime(const PuglWorld* const world)
 PuglStatus
 puglObscureView(PuglView* const view)
 {
-  (void)view;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl->id) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  const PuglArea size = puglCurrentArea(view);
+  return puglObscureRegion(view, 0, 0, size.width, size.height);
 }
 
 PuglStatus
@@ -292,12 +488,42 @@ puglObscureRegion(PuglView* const view,
                   const unsigned  width,
                   const unsigned  height)
 {
-  (void)view;
-  (void)x;
-  (void)y;
-  (void)width;
-  (void)height;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl->id || !puglIsValidPosition(x, y) ||
+      !puglIsValidSize(width, height)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (view->world->state == PUGL_WORLD_EXPOSING) {
+    return PUGL_BAD_CALL;
+  }
+
+  const PuglArea area = puglCurrentArea(view);
+  const int64_t left64 = x < 0 ? 0 : x;
+  const int64_t top64 = y < 0 ? 0 : y;
+  const int64_t right64 = (int64_t)x + (int64_t)width;
+  const int64_t bottom64 = (int64_t)y + (int64_t)height;
+  const int64_t right = right64 < 0
+                          ? 0
+                          : right64 > area.width ? area.width : right64;
+  const int64_t bottom = bottom64 < 0
+                           ? 0
+                           : bottom64 > area.height ? area.height : bottom64;
+
+  if (left64 >= right || top64 >= bottom) {
+    return PUGL_SUCCESS;
+  }
+
+  const PuglExposeEvent event = {
+    PUGL_EXPOSE,
+    0U,
+    (PuglCoord)left64,
+    (PuglCoord)top64,
+    (PuglSpan)(right - left64),
+    (PuglSpan)(bottom - top64),
+  };
+
+  puglMergeExpose(&view->impl->pendingExpose.expose, &event);
+  return PUGL_SUCCESS;
 }
 
 PuglNativeView
@@ -320,8 +546,8 @@ puglApplyViewString(PuglView* const      view,
 double
 puglGetScaleFactor(const PuglView* const view)
 {
-  (void)view;
-  return 1.0;
+  const double ratio = emscripten_get_device_pixel_ratio();
+  return ratio > 0.0 ? ratio : view->world->impl->scaleFactor;
 }
 
 PuglStatus
@@ -338,10 +564,28 @@ puglSetWindowSize(PuglView* const view,
                   const unsigned  width,
                   const unsigned  height)
 {
-  (void)view;
-  (void)width;
-  (void)height;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl->id || !puglIsValidSize(width, height)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  const PuglPoint position =
+    view->lastConfigure.type == PUGL_CONFIGURE
+      ? (PuglPoint){view->lastConfigure.x, view->lastConfigure.y}
+      : puglGetInitialPosition(
+          view, (PuglArea){(PuglSpan)width, (PuglSpan)height});
+
+  puglSetDomGeometry(view, position, width, height);
+
+  if (view->lastConfigure.type == PUGL_CONFIGURE) {
+    PuglEvent event         = {0};
+    event.configure        = view->lastConfigure;
+    event.configure.width  = (PuglSpan)width;
+    event.configure.height = (PuglSpan)height;
+    const PuglStatus st    = puglDispatchEvent(view, &event);
+    return st ? st : puglObscureView(view);
+  }
+
+  return PUGL_SUCCESS;
 }
 
 PuglStatus

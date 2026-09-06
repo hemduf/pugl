@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("page", type=pathlib.Path)
     parser.add_argument("--query", default="")
+    parser.add_argument("--passive", action="store_true")
     parser.add_argument(
         "--diagnostics-dir",
         type=pathlib.Path,
@@ -86,37 +87,38 @@ def main() -> int:
                     timeout=10000,
                 )
 
-                canvas = page.locator("#pugl-wasm-harness")
-                canvas.focus()
-                page.keyboard.press("a")
+                if not args.passive:
+                    canvas = page.locator("#pugl-wasm-harness")
+                    canvas.focus()
+                    page.keyboard.press("a")
 
-                box = canvas.bounding_box()
-                if not box:
-                    raise RuntimeError("Harness canvas has no bounding box")
+                    box = canvas.bounding_box()
+                    if not box:
+                        raise RuntimeError("Harness canvas has no bounding box")
 
-                x = box["x"] + (box["width"] / 2.0)
-                y = box["y"] + (box["height"] / 2.0)
-                page.mouse.move(x, y)
-                page.mouse.down()
-                page.mouse.move(x + 8.0, y + 6.0)
-                page.mouse.up()
-                page.mouse.wheel(0.0, 120.0)
+                    x = box["x"] + (box["width"] / 2.0)
+                    y = box["y"] + (box["height"] / 2.0)
+                    page.mouse.move(x, y)
+                    page.mouse.down()
+                    page.mouse.move(x + 8.0, y + 6.0)
+                    page.mouse.up()
+                    page.mouse.wheel(0.0, 120.0)
 
-                page.set_viewport_size({"width": 640, "height": 480})
-                page.evaluate("window.dispatchEvent(new Event('resize'))")
-                page.wait_for_function(
-                    """
-                    window.puglHarness &&
-                    window.puglHarness.focus >= 1 &&
-                    window.puglHarness.keydown >= 1 &&
-                    window.puglHarness.pointerdown >= 1 &&
-                    window.puglHarness.pointermove >= 1 &&
-                    window.puglHarness.pointerup >= 1 &&
-                    window.puglHarness.wheel >= 1 &&
-                    window.puglHarness.resize >= 1
-                    """,
-                    timeout=5000,
-                )
+                    page.set_viewport_size({"width": 640, "height": 480})
+                    page.evaluate("window.dispatchEvent(new Event('resize'))")
+                    page.wait_for_function(
+                        """
+                        window.puglHarness &&
+                        window.puglHarness.focus >= 1 &&
+                        window.puglHarness.keydown >= 1 &&
+                        window.puglHarness.pointerdown >= 1 &&
+                        window.puglHarness.pointermove >= 1 &&
+                        window.puglHarness.pointerup >= 1 &&
+                        window.puglHarness.wheel >= 1 &&
+                        window.puglHarness.resize >= 1
+                        """,
+                        timeout=5000,
+                    )
 
                 result = page.locator("body").get_attribute("data-pugl-test")
                 reason = page.locator("body").get_attribute("data-pugl-reason")
@@ -132,8 +134,11 @@ def main() -> int:
                     write_diagnostics(page, args.diagnostics_dir)
                     return 1
 
-                counts = page.evaluate("window.puglHarness")
-                print(f"Browser harness passed: {counts}")
+                if args.passive:
+                    print("Browser test passed")
+                else:
+                    counts = page.evaluate("window.puglHarness")
+                    print(f"Browser harness passed: {counts}")
                 return 0
             except (PlaywrightError, PlaywrightTimeoutError, RuntimeError) as error:
                 print(f"Browser harness error: {error}")

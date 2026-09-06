@@ -13,12 +13,14 @@
 
 struct PuglWorldInternalsImpl {
   uintptr_t nextViewId;
+  double    scaleFactor;
 };
 
 struct PuglInternalsImpl {
   PuglSurface* surface;
   PuglEvent    pendingExpose;
   uintptr_t    id;
+  char         canvasSelector[48];
   bool         mapped;
 };
 

@@ -237,6 +237,12 @@ jobs:
           python scripts/run_wasm_browser_test.py
           build-wasm/test/wasm/pugl_wasm_harness.html
           --diagnostics-dir build-wasm/browser-diagnostics/smoke
+      - name: Run lifecycle browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_lifecycle.html
+          --passive
+          --diagnostics-dir build-wasm/browser-diagnostics/lifecycle
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
