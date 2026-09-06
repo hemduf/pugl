@@ -35,27 +35,31 @@ typedef struct {
 } TestContext;
 
 EM_JS(int, puglInstallTestClipboard, (), {
-  if (typeof navigator === 'undefined' || !navigator.clipboard) {
+  if (typeof navigator === 'undefined') {
     return 0;
   }
 
-  const clipboard = navigator.clipboard;
   globalThis.__puglTestClipboardValue = String();
-
-  const writeText = (text) => {
-    globalThis.__puglTestClipboardValue = String(text);
-    return Promise.resolve();
+  const clipboard = {
+    writeText(text) {
+      globalThis.__puglTestClipboardValue = String(text);
+      return Promise.resolve();
+    },
+    readText() {
+      return Promise.resolve(globalThis.__puglTestClipboardValue);
+    }
   };
-  const readText = () => Promise.resolve(globalThis.__puglTestClipboardValue);
 
   try {
-    clipboard.writeText = writeText;
-    clipboard.readText = readText;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: clipboard
+    });
   } catch (_) {
     return 0;
   }
 
-  return clipboard.writeText === writeText && clipboard.readText === readText;
+  return navigator.clipboard === clipboard;
 });
 
 EM_JS(void, puglMarkTestFailure, (const char* reason), {
