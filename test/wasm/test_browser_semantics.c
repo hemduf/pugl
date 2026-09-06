@@ -44,6 +44,25 @@ EM_JS(int, puglTestCanvasIsResizable, (uintptr_t nativeView), {
   return style.resize === 'both' && style.overflow !== 'visible';
 });
 
+EM_JS(int,
+      puglTestCanvasHasSizeConstraints,
+      (uintptr_t nativeView,
+       unsigned minWidth,
+       unsigned minHeight,
+       unsigned maxWidth,
+       unsigned maxHeight), {
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  if (!element) {
+    return 0;
+  }
+
+  const style = getComputedStyle(element);
+  return style.minWidth === `${minWidth}px` &&
+         style.minHeight === `${minHeight}px` &&
+         style.maxWidth === `${maxWidth}px` &&
+         style.maxHeight === `${maxHeight}px`;
+});
+
 EM_JS(int, puglTestCreateHost, (uintptr_t nativeView), {
   const selector = `[data-pugl-native-view="${nativeView}"]`;
   if (!nativeView || document.querySelector(selector)) {
@@ -393,6 +412,51 @@ puglTestResizableViewContract(void)
   return resizable;
 }
 
+static bool
+puglTestSizeConstraintContract(void)
+{
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const view = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreEvent);
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 64U, 48U);
+  const PuglStatus minStatus =
+    puglSetSizeHint(view, PUGL_MIN_SIZE, 32U, 24U);
+  const PuglStatus maxStatus =
+    puglSetSizeHint(view, PUGL_MAX_SIZE, 96U, 72U);
+  const PuglStatus resizableStatus =
+    puglSetViewHint(view, PUGL_RESIZABLE, PUGL_TRUE);
+  const bool realized = puglShow(view, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
+  const PuglNativeView nativeView = puglGetNativeView(view);
+  const bool constrained =
+    minStatus == PUGL_SUCCESS && maxStatus == PUGL_SUCCESS &&
+    resizableStatus == PUGL_SUCCESS && realized && nativeView &&
+    puglTestCanvasHasSizeConstraints(nativeView, 32U, 24U, 96U, 72U);
+
+  if (realized) {
+    (void)puglUnrealize(view);
+  }
+  puglFreeView(view);
+  puglFreeWorld(world);
+
+  if (!constrained) {
+    fprintf(stderr,
+            "Browser size hints must constrain native CSS resizing\n");
+  }
+
+  return constrained;
+}
+
 static void
 puglRunBrowserSemantics(void* const data)
 {
@@ -403,7 +467,8 @@ puglRunBrowserSemantics(void* const data)
       !puglTestNativeViewIdentityContract() ||
       !puglTestBrowserEmbeddingContract() ||
       !puglTestAncestorCenterContract() ||
-      !puglTestResizableViewContract()) {
+      !puglTestResizableViewContract() ||
+      !puglTestSizeConstraintContract()) {
     emscripten_run_script(
       "throw new Error('Browser platform semantics contract failed')");
   }
