@@ -138,6 +138,28 @@ startAndDestroyTimerView(void)
 }
 
 static bool
+startAndDestroyPasteView(void)
+{
+  PuglView* const view = puglNewView(state.world);
+  if (!view) {
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, onEvent);
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);
+
+  const bool started = !puglShow(view, PUGL_SHOW_PASSIVE) && !puglPaste(view);
+  if (!started || puglUnrealize(view)) {
+    puglFreeView(view);
+    return false;
+  }
+
+  puglFreeView(view);
+  return true;
+}
+
+static bool
 verifyStoredClipboard(const char* const expected, const size_t expectedLen)
 {
   if (puglGetNumClipboardTypes(state.view, PUGL_CLIPBOARD_GENERAL) != 1U ||
@@ -304,7 +326,8 @@ main(void)
   if (puglSendEvent(state.view, &client) || state.clientEvents != 1U ||
       !state.clientOrderOk || !puglStopTimer(state.view, 99U) ||
       puglStartTimer(state.view, 7U, 0.020) ||
-      puglStartTimer(state.view, 9U, 0.025) || !startAndDestroyTimerView()) {
+      puglStartTimer(state.view, 9U, 0.025) || !startAndDestroyTimerView() ||
+      !startAndDestroyPasteView()) {
     finish(false);
     return 0;
   }
