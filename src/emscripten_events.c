@@ -665,7 +665,8 @@ puglKeyCallback(const int                            eventType,
   event.key.keycode = browserEvent->which ? browserEvent->which
                                            : browserEvent->keyCode;
   event.key.key     = (uint32_t)key;
-  return puglDispatchEvent(view, &event) == PUGL_SUCCESS;
+  (void)puglDispatchEvent(view, &event);
+  return false;
 }
 
 static bool
