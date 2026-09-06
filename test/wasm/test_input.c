@@ -25,6 +25,7 @@ typedef struct {
   unsigned          keyPress;
   unsigned          keyRelease;
   unsigned          text;
+  unsigned          compositionText;
   unsigned          pointerIn;
   unsigned          pointerOut;
   unsigned          motion;
@@ -101,6 +102,9 @@ onEvent(PuglView* const eventView, const PuglEvent* const event)
   case PUGL_TEXT:
     ++testState->text;
     testState->lastText = event->text;
+    if (event->text.character == 0x6F22U) {
+      ++testState->compositionText;
+    }
     break;
   case PUGL_POINTER_IN:
     ++testState->pointerIn;
@@ -138,7 +142,7 @@ onEvent(PuglView* const eventView, const PuglEvent* const event)
 static void
 dispatchInput(const PuglNativeView currentNativeView)
 {
-  char script[4608] = {0};
+  char script[5120] = {0};
   snprintf(
     script,
     sizeof(script),
@@ -156,6 +160,11 @@ dispatchInput(const PuglNativeView currentNativeView)
     "keyCode:37,which:37,shiftKey:true,ctrlKey:true,bubbles:true}));"
     "input.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',code:'ArrowLeft',"
     "keyCode:37,which:37,shiftKey:true,ctrlKey:true,bubbles:true}));"
+    "input.dispatchEvent(new InputEvent('beforeinput',{data:'漢',"
+    "inputType:'insertCompositionText',isComposing:true,bubbles:true,cancelable:true}));"
+    "input.dispatchEvent(new CompositionEvent('compositionend',{data:'漢',bubbles:true}));"
+    "input.dispatchEvent(new InputEvent('beforeinput',{data:'漢',"
+    "inputType:'insertFromComposition',bubbles:true,cancelable:true}));"
     "const r=e.getBoundingClientRect();"
     "const p=(type,button=0)=>new PointerEvent(type,{pointerId:7,pointerType:'pen',"
     "clientX:r.left+25,clientY:r.top+30,screenX:125,screenY:130,button,buttons:1,"
@@ -218,7 +227,8 @@ puglWasmInputFinish(void)
   CHECK(world);
   CHECK(view);
   CHECK(nativeView != 0U);
-  CHECK(state.text == 1U);
+  CHECK(state.text == 2U);
+  CHECK(state.compositionText == 1U);
   CHECK(state.lastText.character == 0x00C9U);
   CHECK(strcmp(state.lastText.string, "É") == 0);
   CHECK((state.lastText.state & PUGL_MOD_SHIFT) != 0U);
@@ -281,7 +291,8 @@ main(void)
   CHECK(state.lastKey.key == PUGL_KEY_LEFT);
   CHECK((state.lastKey.state & PUGL_MOD_SHIFT) != 0U);
   CHECK((state.lastKey.state & PUGL_MOD_CTRL) != 0U);
-  CHECK(state.text == 0U);
+  CHECK(state.text == 1U);
+  CHECK(state.compositionText == 1U);
   CHECK(state.pointerIn >= 1U);
   CHECK(state.pointerOut >= 1U);
   CHECK(state.motion >= 1U);
