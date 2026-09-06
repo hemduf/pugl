@@ -52,3 +52,31 @@ puglTestBrowserCursorContract(void)
       "throw new Error('Browser cursor mapping contract is not implemented')");
   }
 }
+
+__attribute__((constructor)) static void
+puglTestUnsupportedDesktopWindowContract(void)
+{
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const  view  = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    fprintf(stderr, "Browser desktop-window semantics test setup failed\n");
+    return;
+  }
+
+  const PuglStatus positionStatus = puglSetWindowPosition(view, 12, 34);
+  const PuglStatus transientStatus =
+    puglSetTransientParent(view, (PuglNativeView)1234U);
+
+  puglFreeView(view);
+  puglFreeWorld(world);
+
+  if (positionStatus != PUGL_UNSUPPORTED ||
+      transientStatus != PUGL_UNSUPPORTED) {
+    fprintf(stderr,
+            "Browser desktop-only APIs must be explicit: position=%d transient=%d\n",
+            (int)positionStatus,
+            (int)transientStatus);
+    emscripten_run_script(
+      "throw new Error('Browser desktop-only API contract is not explicit')");
+  }
+}
