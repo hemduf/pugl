@@ -184,6 +184,10 @@ def main() -> int:
                 return 0
             except (PlaywrightError, PlaywrightTimeoutError, RuntimeError) as error:
                 print(f"Browser harness error: {error}")
+                for message in console_errors:
+                    print(f"Console error: {message}")
+                for message in page_errors:
+                    print(f"Page error: {message}")
                 write_diagnostics(page, args.diagnostics_dir)
                 return 1
             finally:
