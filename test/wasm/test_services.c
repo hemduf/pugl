@@ -281,10 +281,10 @@ main(void)
 
   if (puglSetClipboard(state.view,
                        PUGL_CLIPBOARD_GENERAL,
-                       "text/plain",
+                       NULL,
                        clipboardText,
                        strlen(clipboardText)) != PUGL_SUCCESS) {
-    fprintf(stderr, "Browser clipboard write contract is not implemented\n");
+    fprintf(stderr, "Browser clipboard default MIME contract is not implemented\n");
     finish(false);
     return 0;
   }
