@@ -68,7 +68,8 @@ main(void)
   CHECK(view);
 
   CHECK(!puglSetBackend(view, puglStubBackend()));
-  CHECK(!puglSetHandle(view, &state));
+  puglSetHandle(view, &state);
+  CHECK(puglGetHandle(view) == &state);
   CHECK(!puglSetEventFunc(view, onEvent));
   CHECK(!puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 320U, 180U));
   CHECK(!puglSetPositionHint(view, PUGL_DEFAULT_POSITION, 10, 20));
