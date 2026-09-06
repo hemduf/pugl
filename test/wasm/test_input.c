@@ -154,7 +154,7 @@ onEvent(PuglView* const eventView, const PuglEvent* const event)
 static void
 dispatchInput(const PuglNativeView currentNativeView)
 {
-  char script[5120] = {0};
+  char script[6144] = {0};
   snprintf(
     script,
     sizeof(script),
@@ -162,6 +162,11 @@ dispatchInput(const PuglNativeView currentNativeView)
     "if(!e)throw new Error('missing Pugl canvas');"
     "const input=document.getElementById(e.id+'-input');"
     "if(!input)throw new Error('missing Pugl text input');"
+    "const inputEvent=(type,data,inputType,isComposing)=>{"
+    "const ev=new InputEvent(type,{data,bubbles:true,cancelable:type==='beforeinput'});"
+    "Object.defineProperty(ev,'inputType',{value:inputType});"
+    "Object.defineProperty(ev,'isComposing',{value:isComposing});"
+    "return ev;};"
     "e.focus();"
     "if(document.activeElement!==input)throw new Error('canvas focus did not redirect');"
     "input.dispatchEvent(new KeyboardEvent('keydown',{key:'é',code:'KeyE',"
@@ -173,17 +178,13 @@ dispatchInput(const PuglNativeView currentNativeView)
     "input.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',code:'ArrowLeft',"
     "keyCode:37,which:37,shiftKey:true,ctrlKey:true,bubbles:true}));"
     "input.dispatchEvent(new CompositionEvent('compositionstart',{data:'',bubbles:true}));"
-    "input.dispatchEvent(new InputEvent('beforeinput',{data:'漢',"
-    "inputType:'insertCompositionText',isComposing:true,bubbles:true,cancelable:true}));"
+    "input.dispatchEvent(inputEvent('beforeinput','漢','insertCompositionText',true));"
     "input.value='漢';"
-    "input.dispatchEvent(new InputEvent('input',{data:'漢',"
-    "inputType:'insertCompositionText',isComposing:true,bubbles:true}));"
+    "input.dispatchEvent(inputEvent('input','漢','insertCompositionText',true));"
     "input.dispatchEvent(new CompositionEvent('compositionend',{data:'漢',bubbles:true}));"
-    "input.dispatchEvent(new InputEvent('beforeinput',{data:'漢',"
-    "inputType:'insertFromComposition',bubbles:true,cancelable:true}));"
+    "input.dispatchEvent(inputEvent('beforeinput','漢','insertFromComposition',false));"
     "input.value='漢';"
-    "input.dispatchEvent(new InputEvent('input',{data:'漢',"
-    "inputType:'insertFromComposition',bubbles:true}));"
+    "input.dispatchEvent(inputEvent('input','漢','insertFromComposition',false));"
     "const r=e.getBoundingClientRect();"
     "const p=(type,button=0)=>new PointerEvent(type,{pointerId:7,pointerType:'pen',"
     "clientX:r.left+25,clientY:r.top+30,screenX:125,screenY:130,button,buttons:1,"
