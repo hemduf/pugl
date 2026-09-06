@@ -177,6 +177,17 @@ main(void)
     return 0;
   }
 
+  static const char clipboardText[] = "pugl-browser-clipboard";
+  if (puglSetClipboard(state.view,
+                       PUGL_CLIPBOARD_GENERAL,
+                       "text/plain",
+                       clipboardText,
+                       sizeof(clipboardText)) != PUGL_SUCCESS) {
+    fprintf(stderr, "Browser clipboard write contract is not implemented\n");
+    finish(false);
+    return 0;
+  }
+
   PuglEvent client = {0};
   client.client.type  = PUGL_CLIENT;
   client.client.flags = PUGL_IS_SEND_EVENT;
