@@ -639,7 +639,7 @@ puglCreateDomView(const PuglView* const view,
                   const PuglPoint       position,
                   const PuglArea        size)
 {
-  char script[1024] = {0};
+  char script[1280] = {0};
   snprintf(script,
            sizeof(script),
            "(()=>{if(typeof document==='undefined'||!document.body)return 0;"
@@ -653,6 +653,7 @@ puglCreateDomView(const PuglView* const view,
            "e.style.boxSizing='border-box';e.style.display='none';"
            "e.style.position='absolute';e.style.left='%dpx';e.style.top='%dpx';"
            "e.style.width='%upx';e.style.height='%upx';e.style.outline='none';"
+           "if(%d){e.style.resize='both';e.style.overflow='hidden';}"
            "const r=(typeof window!=='undefined'&&window.devicePixelRatio>0)"
            "?window.devicePixelRatio:1;"
            "e.width=Math.max(1,Math.round(%u*r));"
@@ -665,6 +666,7 @@ puglCreateDomView(const PuglView* const view,
            position.y,
            size.width,
            size.height,
+           view->hints[PUGL_RESIZABLE] == PUGL_TRUE,
            size.width,
            size.height);
   return emscripten_run_script_int(script) != 0;
