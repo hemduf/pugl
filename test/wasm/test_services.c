@@ -25,6 +25,7 @@ typedef struct {
   unsigned   timer9AtStop;
   unsigned   clipboardOffers;
   unsigned   clipboardDataEvents;
+  unsigned   clipboardWritePolls;
   bool       clientOrderOk;
   bool       timer7Restarted;
   bool       clipboardOfferOk;
@@ -169,6 +170,36 @@ verifyStoredClipboard(const char* const expected, const size_t expectedLen)
 }
 
 static void
+requestPaste(void* const data)
+{
+  (void)data;
+
+  if (!state.view) {
+    return;
+  }
+
+  const int writeState = emscripten_run_script_int(
+    "document.body.dataset.puglClipboardWrite==='success'?1:"
+    "document.body.dataset.puglClipboardWrite==='denied'?-1:0");
+
+  if (writeState == 1) {
+    if (puglPaste(state.view) != PUGL_SUCCESS) {
+      fprintf(stderr, "Browser clipboard paste contract is not implemented\n");
+      finish(false);
+    }
+    return;
+  }
+
+  if (writeState < 0 || ++state.clipboardWritePolls >= 50U) {
+    fprintf(stderr, "Browser clipboard write did not become readable\n");
+    finish(false);
+    return;
+  }
+
+  emscripten_set_timeout(requestPaste, 10.0, NULL);
+}
+
+static void
 restartTimer7(void* const data)
 {
   (void)data;
@@ -264,12 +295,6 @@ main(void)
     return 0;
   }
 
-  if (puglPaste(state.view) != PUGL_SUCCESS) {
-    fprintf(stderr, "Browser clipboard paste contract is not implemented\n");
-    finish(false);
-    return 0;
-  }
-
   PuglEvent client = {0};
   client.client.type  = PUGL_CLIENT;
   client.client.flags = PUGL_IS_SEND_EVENT;
@@ -284,8 +309,9 @@ main(void)
     return 0;
   }
 
+  emscripten_set_timeout(requestPaste, 0.0, NULL);
   emscripten_set_timeout(restartTimer7, 70.0, NULL);
   emscripten_set_timeout(stopTimer9, 100.0, NULL);
-  emscripten_set_timeout(finishServices, 170.0, NULL);
+  emscripten_set_timeout(finishServices, 600.0, NULL);
   return 0;
 }

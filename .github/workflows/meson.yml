@@ -254,6 +254,7 @@ jobs:
           python scripts/run_wasm_browser_test.py
           build-wasm/test/wasm/pugl_wasm_services.html
           --passive
+          --clipboard
           --diagnostics-dir build-wasm/browser-diagnostics/services
       - name: Upload browser diagnostics
         if: failure()

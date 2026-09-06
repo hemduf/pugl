@@ -22,6 +22,7 @@
 #include <string.h>
 
 typedef struct PuglBrowserTimerImpl PuglBrowserTimer;
+typedef struct PuglBrowserPasteRequestImpl PuglBrowserPasteRequest;
 
 struct PuglBrowserTimerImpl {
   PuglBrowserTimer* next;
@@ -30,14 +31,33 @@ struct PuglBrowserTimerImpl {
   long              intervalId;
 };
 
+struct PuglBrowserPasteRequestImpl {
+  PuglBrowserPasteRequest* next;
+  PuglView*                view;
+  uintptr_t                token;
+  unsigned char*           data;
+  size_t                   len;
+};
+
 typedef struct {
   char*          type;
   unsigned char* data;
   size_t         len;
 } PuglBrowserClipboard;
 
-static PuglBrowserTimer* puglBrowserTimers = NULL;
-static PuglBrowserClipboard puglBrowserClipboard = {NULL, NULL, 0U};
+static PuglBrowserTimer*        puglBrowserTimers        = NULL;
+static PuglBrowserPasteRequest* puglBrowserPasteRequests = NULL;
+static PuglBrowserClipboard     puglBrowserClipboard     = {NULL, NULL, 0U};
+static uintptr_t                puglNextPasteToken       = 1U;
+static PuglView*                puglBrowserOfferView     = NULL;
+static const PuglDataOfferEvent* puglBrowserOffer        = NULL;
+static bool                     puglBrowserOfferHandled  = false;
+
+#if defined(__GNUC__)
+#  define PUGL_BROWSER_EXPORT __attribute__((visibility("default")))
+#else
+#  define PUGL_BROWSER_EXPORT
+#endif
 
 EM_JS(int, puglBrowserWriteClipboardText, (const char* text), {
   if (typeof navigator === 'undefined' || !navigator.clipboard ||
@@ -66,6 +86,51 @@ EM_JS(int, puglBrowserWriteClipboardText, (const char* text), {
   return 1;
 });
 
+EM_JS(int, puglBrowserReadClipboardText, (uintptr_t token), {
+  if (typeof navigator === 'undefined' || !navigator.clipboard ||
+      typeof navigator.clipboard.readText !== 'function') {
+    return 0;
+  }
+
+  const begin = Module['_puglEmscriptenPasteBegin'];
+  const end = Module['_puglEmscriptenPasteEnd'];
+  if (typeof begin !== 'function' || typeof end !== 'function') {
+    return 0;
+  }
+
+  const body = typeof document !== 'undefined' ? document.body : null;
+  if (body) {
+    body.dataset.puglClipboardRead = 'pending';
+  }
+
+  navigator.clipboard.readText().then(
+    (text) => {
+      const bytes = new TextEncoder().encode(String(text));
+      const pointer = begin(token, bytes.length);
+      if (!pointer) {
+        end(token, 0);
+        if (body) {
+          body.dataset.puglClipboardRead = 'failed';
+        }
+        return;
+      }
+
+      HEAPU8.set(bytes, pointer);
+      const delivered = end(token, 1);
+      if (body) {
+        body.dataset.puglClipboardRead = delivered ? 'success' : 'failed';
+      }
+    },
+    () => {
+      end(token, 0);
+      if (body) {
+        body.dataset.puglClipboardRead = 'denied';
+      }
+    });
+
+  return 1;
+});
+
 static PuglBrowserTimer*
 puglFindBrowserTimer(PuglView* const view, const uintptr_t id)
 {
@@ -76,6 +141,66 @@ puglFindBrowserTimer(PuglView* const view, const uintptr_t id)
   }
 
   return NULL;
+}
+
+static PuglBrowserPasteRequest*
+puglFindBrowserPasteRequest(const uintptr_t token)
+{
+  for (PuglBrowserPasteRequest* request = puglBrowserPasteRequests; request;
+       request = request->next) {
+    if (request->token == token) {
+      return request;
+    }
+  }
+
+  return NULL;
+}
+
+static PuglBrowserPasteRequest*
+puglFindBrowserPasteRequestForView(const PuglView* const view)
+{
+  for (PuglBrowserPasteRequest* request = puglBrowserPasteRequests; request;
+       request = request->next) {
+    if (request->view == view) {
+      return request;
+    }
+  }
+
+  return NULL;
+}
+
+static void
+puglRemoveBrowserPasteRequest(PuglBrowserPasteRequest* const request)
+{
+  PuglBrowserPasteRequest** link = &puglBrowserPasteRequests;
+  while (*link && *link != request) {
+    link = &(*link)->next;
+  }
+
+  if (*link) {
+    *link = request->next;
+  }
+
+  request->next = NULL;
+}
+
+static void
+puglClearBrowserPasteRequests(PuglView* const view)
+{
+  PuglBrowserPasteRequest** link = &puglBrowserPasteRequests;
+  while (*link) {
+    PuglBrowserPasteRequest* const request = *link;
+    if (request->view == view) {
+      *link = request->next;
+      free(request->data);
+      request->data  = NULL;
+      request->view  = NULL;
+      request->token = 0U;
+      free(request);
+    } else {
+      link = &request->next;
+    }
+  }
 }
 
 static void
@@ -107,6 +232,79 @@ puglClearBrowserTimers(PuglView* const view)
       link = &timer->next;
     }
   }
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT uintptr_t
+puglEmscriptenPasteBegin(const uintptr_t token, const size_t len)
+{
+  PuglBrowserPasteRequest* const request = puglFindBrowserPasteRequest(token);
+  PuglView* const view = request ? request->view : NULL;
+  if (!request || !view || !view->impl || !view->impl->id) {
+    return 0U;
+  }
+
+  unsigned char* const data = (unsigned char*)malloc(len + 1U);
+  if (!data) {
+    return 0U;
+  }
+
+  free(request->data);
+  request->data = data;
+  request->len  = len;
+  return (uintptr_t)data;
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT int
+puglEmscriptenPasteEnd(const uintptr_t token, const int success)
+{
+  PuglBrowserPasteRequest* const request = puglFindBrowserPasteRequest(token);
+  if (!request) {
+    return 0;
+  }
+
+  PuglView* const      view = request->view;
+  unsigned char* const data = request->data;
+  const size_t         len  = request->len;
+  request->data              = NULL;
+  request->view              = NULL;
+  puglRemoveBrowserPasteRequest(request);
+  free(request);
+
+  if (!success || !data || !view || !view->impl || !view->impl->id) {
+    free(data);
+    return success ? 0 : 1;
+  }
+
+  data[len] = '\0';
+  static const char textType[] = "text/plain";
+  char* const newType = (char*)malloc(sizeof(textType));
+  if (!newType) {
+    free(data);
+    return 0;
+  }
+
+  memcpy(newType, textType, sizeof(textType));
+  free(puglBrowserClipboard.type);
+  free(puglBrowserClipboard.data);
+  puglBrowserClipboard.type = newType;
+  puglBrowserClipboard.data = data;
+  puglBrowserClipboard.len  = len;
+
+  PuglEvent event         = {0};
+  event.offer.type        = PUGL_DATA_OFFER;
+  event.offer.time        = puglGetTime(view->world);
+  event.offer.x           = view->impl->pointerX;
+  event.offer.y           = view->impl->pointerY;
+  event.offer.clipboard   = PUGL_CLIPBOARD_GENERAL;
+
+  puglBrowserOfferView    = view;
+  puglBrowserOffer        = &event.offer;
+  puglBrowserOfferHandled = false;
+  const PuglStatus st     = puglDispatchEvent(view, &event);
+  puglBrowserOfferView    = NULL;
+  puglBrowserOffer        = NULL;
+  puglBrowserOfferHandled = false;
+  return st == PUGL_SUCCESS;
 }
 
 static PuglCoord
@@ -311,6 +509,7 @@ puglFreeViewInternals(PuglView* const view)
     }
 
     puglClearBrowserTimers(view);
+    puglClearBrowserPasteRequests(view);
     puglEmscriptenFreeInput(view);
     free(view->impl);
   }
@@ -400,6 +599,7 @@ puglUnrealize(PuglView* const view)
   const uintptr_t id = impl->id;
   const PuglStatus st = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
   puglClearBrowserTimers(view);
+  puglClearBrowserPasteRequests(view);
   puglEmscriptenUnregisterInput(view);
   view->backend->destroy(view);
   puglDestroyDomView(id);
@@ -753,15 +953,28 @@ puglAcceptOffer(PuglView* const                 view,
                 const unsigned                  regionWidth,
                 const unsigned                  regionHeight)
 {
-  (void)view;
-  (void)offer;
-  (void)typeIndex;
-  (void)action;
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-  return PUGL_UNSUPPORTED;
+  if (!view || !offer || !view->impl || !view->impl->id ||
+      !puglIsValidPosition(regionX, regionY) ||
+      !puglIsValidSize(regionWidth, regionHeight) ||
+      action > PUGL_DATA_ACTION_PRIVATE || typeIndex != 0U ||
+      offer->clipboard != PUGL_CLIPBOARD_GENERAL) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (view != puglBrowserOfferView || offer != puglBrowserOffer ||
+      puglBrowserOfferHandled || !puglBrowserClipboard.type) {
+    return PUGL_BAD_CALL;
+  }
+
+  puglBrowserOfferHandled = true;
+  PuglEvent event         = {0};
+  event.data.type         = PUGL_DATA;
+  event.data.time         = offer->time;
+  event.data.x            = offer->x;
+  event.data.y            = offer->y;
+  event.data.clipboard    = offer->clipboard;
+  event.data.typeIndex    = typeIndex;
+  return puglDispatchEvent(view, &event);
 }
 
 PuglStatus
@@ -772,20 +985,56 @@ puglRejectOffer(PuglView* const                 view,
                 const unsigned                  regionWidth,
                 const unsigned                  regionHeight)
 {
-  (void)view;
-  (void)offer;
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-  return PUGL_UNSUPPORTED;
+  if (!view || !offer || !view->impl || !view->impl->id ||
+      !puglIsValidPosition(regionX, regionY) ||
+      !puglIsValidSize(regionWidth, regionHeight) ||
+      offer->clipboard != PUGL_CLIPBOARD_GENERAL) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (view != puglBrowserOfferView || offer != puglBrowserOffer ||
+      puglBrowserOfferHandled) {
+    return PUGL_BAD_CALL;
+  }
+
+  puglBrowserOfferHandled = true;
+  return PUGL_SUCCESS;
 }
 
 PuglStatus
 puglPaste(PuglView* const view)
 {
-  (void)view;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || !view->impl->id) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (puglFindBrowserPasteRequestForView(view)) {
+    return PUGL_FAILURE;
+  }
+
+  PuglBrowserPasteRequest* const request =
+    (PuglBrowserPasteRequest*)calloc(1U, sizeof(PuglBrowserPasteRequest));
+  if (!request) {
+    return PUGL_NO_MEMORY;
+  }
+
+  uintptr_t token = puglNextPasteToken++;
+  if (!token) {
+    token = puglNextPasteToken++;
+  }
+
+  request->view  = view;
+  request->token = token;
+  request->next  = puglBrowserPasteRequests;
+  puglBrowserPasteRequests = request;
+
+  if (!puglBrowserReadClipboardText(token)) {
+    puglRemoveBrowserPasteRequest(request);
+    free(request);
+    return PUGL_UNSUPPORTED;
+  }
+
+  return PUGL_SUCCESS;
 }
 
 PuglStatus
