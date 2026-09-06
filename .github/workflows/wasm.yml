@@ -15,7 +15,7 @@ env:
   EMSCRIPTEN_IMAGE: emscripten/emsdk:6.0.9
 
 jobs:
-  browser-lifecycle:
+  browser-tests:
     runs-on: ubuntu-latest
 
     steps:
@@ -31,16 +31,16 @@ jobs:
             "$EMSCRIPTEN_IMAGE" \
             emcmake cmake -S test/wasm -B build-wasm -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build lifecycle test
+      - name: Build browser tests
         run: |
           docker run --rm \
             -v "$PWD:/src" \
             -w /src \
             -u "$(id -u):$(id -g)" \
             "$EMSCRIPTEN_IMAGE" \
-            cmake --build build-wasm --target pugl_wasm_lifecycle --verbose
+            cmake --build build-wasm --verbose
 
-      - name: Run lifecycle test in headless browser
+      - name: Run tests in headless browser
         shell: bash
         run: |
           set -euo pipefail
@@ -51,14 +51,17 @@ jobs:
           chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           test -n "$chrome"
 
-          "$chrome" \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --virtual-time-budget=5000 \
-            --dump-dom \
-            http://127.0.0.1:8123/pugl_wasm_lifecycle.html \
-            > /tmp/pugl-dom.html
+          for test_name in pugl_wasm_lifecycle pugl_wasm_input; do
+            dom="/tmp/${test_name}.html"
+            "$chrome" \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --virtual-time-budget=5000 \
+              --dump-dom \
+              "http://127.0.0.1:8123/${test_name}.html" \
+              > "$dom"
 
-          cat /tmp/pugl-dom.html
-          grep -q 'data-pugl-test="pass"' /tmp/pugl-dom.html
+            cat "$dom"
+            grep -q 'data-pugl-test="pass"' "$dom"
+          done
