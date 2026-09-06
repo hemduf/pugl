@@ -14,6 +14,7 @@ include(CTest)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(PUGL_BUILD_STUB "Build the stub graphics backend" ON)
 option(PUGL_BUILD_OPENGL "Build the OpenGL graphics backend when available" ON)
 option(PUGL_BUILD_CAIRO "Build the Cairo graphics backend when available" ON)
@@ -136,7 +137,7 @@ else()
   endif()
 
   set(PUGL_USE_XSYNC 0)
-  if(PUGL_XSYNC AND X11_Xext_FOUND)
+  if(PUGL_XSYNC AND X11_Xext_FOUND AND X11_XSync_FOUND)
     set(PUGL_USE_XSYNC 1)
     if(TARGET X11::Xext)
       list(APPEND pugl_platform_link_libraries X11::Xext)
@@ -195,6 +196,7 @@ if(PUGL_BUILD_STUB)
   pugl_configure_library(pugl_stub)
   target_link_libraries(pugl_stub PUBLIC pugl)
   set_target_properties(pugl_stub PROPERTIES
+    EXPORT_NAME stub
     OUTPUT_NAME "pugl_${pugl_platform}_stub${PUGL_VERSION_SUFFIX}"
     VERSION "${PROJECT_VERSION}"
   )
@@ -212,6 +214,7 @@ if(PUGL_BUILD_OPENGL)
     pugl_configure_library(pugl_gl)
     target_link_libraries(pugl_gl PUBLIC pugl OpenGL::GL)
     set_target_properties(pugl_gl PROPERTIES
+      EXPORT_NAME gl
       OUTPUT_NAME "pugl_${pugl_platform}_gl${PUGL_VERSION_SUFFIX}"
       VERSION "${PROJECT_VERSION}"
     )
@@ -241,6 +244,7 @@ if(PUGL_BUILD_CAIRO)
       target_link_libraries(pugl_cairo PUBLIC "${PUGL_COREGRAPHICS_FRAMEWORK}")
     endif()
     set_target_properties(pugl_cairo PROPERTIES
+      EXPORT_NAME cairo
       OUTPUT_NAME "pugl_${pugl_platform}_cairo${PUGL_VERSION_SUFFIX}"
       VERSION "${PROJECT_VERSION}"
     )
@@ -271,6 +275,7 @@ if(PUGL_BUILD_VULKAN)
       )
     endif()
     set_target_properties(pugl_vulkan PROPERTIES
+      EXPORT_NAME vulkan
       OUTPUT_NAME "pugl_${pugl_platform}_vulkan${PUGL_VERSION_SUFFIX}"
       VERSION "${PROJECT_VERSION}"
     )
@@ -289,21 +294,11 @@ if(PUGL_BUILD_TESTS AND BUILD_TESTING)
   target_link_libraries(pugl_test_strerror PRIVATE pugl)
   add_test(NAME pugl.cmake.strerror COMMAND pugl_test_strerror)
 
-  add_executable(pugl_test_headers test/test_build.c)
-  target_link_libraries(pugl_test_headers PRIVATE pugl)
   if(TARGET pugl_stub)
+    add_executable(pugl_test_headers test/cmake/test_headers.c)
     target_link_libraries(pugl_test_headers PRIVATE pugl_stub)
+    add_test(NAME pugl.cmake.headers COMMAND pugl_test_headers)
   endif()
-  if(TARGET pugl_gl)
-    target_link_libraries(pugl_test_headers PRIVATE pugl_gl)
-  endif()
-  if(TARGET pugl_cairo)
-    target_link_libraries(pugl_test_headers PRIVATE pugl_cairo)
-  endif()
-  if(TARGET pugl_vulkan)
-    target_link_libraries(pugl_test_headers PRIVATE pugl_vulkan)
-  endif()
-  add_test(NAME pugl.cmake.headers COMMAND pugl_test_headers)
 endif()
 
 if(PUGL_INSTALL)
