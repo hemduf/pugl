@@ -6,6 +6,7 @@
 
 #include <pugl/pugl.h>
 
+#include <stddef.h>
 #include <stdint.h>
 
 PuglStatus puglEmscriptenRegisterCallbacks(PuglView* view);
