@@ -55,6 +55,14 @@ EM_JS(void, puglTestDestroyHost, (uintptr_t nativeView), {
   }
 });
 
+static PuglStatus
+puglTestIgnoreEvent(PuglView* const view, const PuglEvent* const event)
+{
+  (void)view;
+  (void)event;
+  return PUGL_SUCCESS;
+}
+
 static bool
 puglTestBrowserCursorContract(void)
 {
@@ -72,6 +80,7 @@ puglTestBrowserCursorContract(void)
   }
 
   puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreEvent);
   puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);
 
   const bool realized = puglShow(view, PUGL_SHOW_PASSIVE) == PUGL_SUCCESS;
@@ -113,6 +122,7 @@ puglTestUnsupportedDesktopWindowContract(void)
   }
 
   puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreEvent);
   puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 32U, 32U);
 
   const PuglStatus transientStatus =
@@ -167,6 +177,8 @@ puglTestNativeViewIdentityContract(void)
 
   puglSetBackend(view0, puglStubBackend());
   puglSetBackend(view1, puglStubBackend());
+  puglSetEventFunc(view0, puglTestIgnoreEvent);
+  puglSetEventFunc(view1, puglTestIgnoreEvent);
   puglSetSizeHint(view0, PUGL_DEFAULT_SIZE, 16U, 16U);
   puglSetSizeHint(view1, PUGL_DEFAULT_SIZE, 16U, 16U);
 
@@ -223,6 +235,7 @@ puglTestBrowserEmbeddingContract(void)
   }
 
   puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreEvent);
   puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 48U, 24U);
   const PuglStatus parentStatus = puglSetParent(view, parent);
   const PuglStatus realizeStatus = puglShow(view, PUGL_SHOW_PASSIVE);
@@ -249,6 +262,7 @@ puglTestBrowserEmbeddingContract(void)
   bool missingParentRejected = false;
   if (missingWorld && missingView) {
     puglSetBackend(missingView, puglStubBackend());
+    puglSetEventFunc(missingView, puglTestIgnoreEvent);
     puglSetSizeHint(missingView, PUGL_DEFAULT_SIZE, 16U, 16U);
     (void)puglSetParent(missingView, (PuglNativeView)0xDEADU);
     missingParentRejected =
