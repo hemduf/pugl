@@ -29,7 +29,7 @@ jobs:
             -w /src \
             -u "$(id -u):$(id -g)" \
             "$EMSCRIPTEN_IMAGE" \
-            emcmake cmake -S test/wasm -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release
+            emcmake cmake -S test/wasm -B build-wasm -DCMAKE_BUILD_TYPE=Release
 
       - name: Build lifecycle test
         run: |
