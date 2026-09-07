@@ -34,20 +34,21 @@ jobs:
 
           path = Path('src/emscripten.c')
           text = path.read_text()
-          old = '''  if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE &&
-              hint != PUGL_FIXED_ASPECT) {
-            return PUGL_SUCCESS;
-          }
-          '''.replace('          ', '')
-          new = '''  if (hint == PUGL_MIN_ASPECT || hint == PUGL_MAX_ASPECT) {
-            return PUGL_UNSUPPORTED;
-          }
-
-          if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE &&
-              hint != PUGL_FIXED_ASPECT) {
-            return PUGL_SUCCESS;
-          }
-          '''.replace('          ', '')
+          old = (
+              "  if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE &&\n"
+              "      hint != PUGL_FIXED_ASPECT) {\n"
+              "    return PUGL_SUCCESS;\n"
+              "  }\n"
+          )
+          new = (
+              "  if (hint == PUGL_MIN_ASPECT || hint == PUGL_MAX_ASPECT) {\n"
+              "    return PUGL_UNSUPPORTED;\n"
+              "  }\n\n"
+              "  if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE &&\n"
+              "      hint != PUGL_FIXED_ASPECT) {\n"
+              "    return PUGL_SUCCESS;\n"
+              "  }\n"
+          )
           if old in text:
               path.write_text(text.replace(old, new, 1))
           elif new not in text:
