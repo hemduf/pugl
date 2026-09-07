@@ -1038,8 +1038,6 @@ puglUnrealize(PuglView* const view)
 PuglStatus
 puglShow(PuglView* const view, const PuglShowCommand command)
 {
-  (void)command;
-
   PuglInternals* const impl = view ? view->impl : NULL;
   if (!impl) {
     return PUGL_BAD_PARAMETER;
@@ -1059,7 +1057,11 @@ puglShow(PuglView* const view, const PuglShowCommand command)
     }
   }
 
-  return st;
+  if (st) {
+    return st;
+  }
+
+  return command == PUGL_SHOW_PASSIVE ? PUGL_SUCCESS : PUGL_FAILURE;
 }
 
 PuglStatus
