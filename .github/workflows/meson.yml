@@ -162,7 +162,7 @@ jobs:
           -Ddocs=disabled
           -Dexamples=disabled
           -Dinstall=disabled
-          -Dopengl=disabled
+          -Dopengl=enabled
           -Dstub=true
           -Dtests=enabled
           -Dvulkan=disabled
@@ -262,6 +262,12 @@ jobs:
           --passive
           --clipboard
           --diagnostics-dir build-wasm/browser-diagnostics/services
+      - name: Run WebGL browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_webgl.html
+          --passive
+          --diagnostics-dir build-wasm/browser-diagnostics/webgl
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

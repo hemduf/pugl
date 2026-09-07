@@ -55,3 +55,15 @@ executable(
   link_args: wasm_live_link_args,
   name_suffix: 'html',
 )
+
+if get_option('opengl').enabled()
+  executable(
+    'pugl_wasm_webgl',
+    'test_webgl.c',
+    c_args: test_c_args,
+    dependencies: [pugl_dep, pugl_gl_dep],
+    install: false,
+    link_args: wasm_link_args + ['-sMAX_WEBGL_VERSION=2'],
+    name_suffix: 'html',
+  )
+endif
