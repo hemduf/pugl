@@ -5,6 +5,7 @@
 #include <pugl/stub.h>
 
 #include <emscripten.h>
+#include <emscripten/html5.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -18,8 +19,8 @@ EM_JS(int,
     return 0;
   }
 
-  const actual = getComputedStyle(element).aspectRatio.replaceAll(' ', '');
-  return actual === `${width}/${height}`;
+  const actual = getComputedStyle(element).aspectRatio;
+  return actual === `${width} / ${height}` || actual === `${width}/${height}`;
 });
 
 static PuglStatus
