@@ -171,7 +171,7 @@ def exercise_demo(page: object) -> None:
           window.puglDemo.expose > expose &&
           window.puglDemo.pixelOk
         """,
-        [initial_configure, initial_expose],
+        arg=[initial_configure, initial_expose],
         timeout=5000,
     )
 
