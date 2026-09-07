@@ -757,6 +757,30 @@ puglSetDomSizeConstraint(const PuglView* const view,
   return emscripten_run_script_int(script) != 0;
 }
 
+static bool
+puglSetDomAspectRatio(const PuglView* const view, const PuglArea area)
+{
+  char script[512] = {0};
+
+  if (puglIsValidArea(area)) {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.aspectRatio='%u / %u';return 1;})()",
+             view->impl->id,
+             area.width,
+             area.height);
+  } else {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.aspectRatio='';return 1;})()",
+             view->impl->id);
+  }
+
+  return emscripten_run_script_int(script) != 0;
+}
+
 static int
 puglGetBrowserDimension(const char* const name)
 {
@@ -891,12 +915,18 @@ puglApplySizeHint(PuglView* const view, const PuglSizeHint hint)
     return PUGL_BAD_PARAMETER;
   }
 
-  if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE) {
+  if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE &&
+      hint != PUGL_FIXED_ASPECT) {
     return PUGL_SUCCESS;
   }
 
   if (!view->impl->id) {
     return PUGL_SUCCESS;
+  }
+
+  if (hint == PUGL_FIXED_ASPECT) {
+    return puglSetDomAspectRatio(view, view->sizeHints[hint]) ? PUGL_SUCCESS
+                                                              : PUGL_FAILURE;
   }
 
   return puglSetDomSizeConstraint(view, hint, view->sizeHints[hint])
@@ -940,7 +970,8 @@ puglRealize(PuglView* const view)
   }
 
   if ((st = puglApplySizeHint(view, PUGL_MIN_SIZE)) ||
-      (st = puglApplySizeHint(view, PUGL_MAX_SIZE))) {
+      (st = puglApplySizeHint(view, PUGL_MAX_SIZE)) ||
+      (st = puglApplySizeHint(view, PUGL_FIXED_ASPECT))) {
     puglDestroyDomView(impl->id);
     impl->id = 0U;
     return st;
