@@ -64,6 +64,7 @@ static PuglBrowserClipboard     puglBrowserClipboard     = {NULL, NULL, 0U};
 static unsigned char*           puglBrowserDragData      = NULL;
 static size_t                   puglBrowserDragLen       = 0U;
 static PuglView*                puglBrowserDragView      = NULL;
+static uintptr_t                puglNextDomViewId        = 1U;
 static uintptr_t                puglNextPasteToken       = 1U;
 static uintptr_t                puglNextDropToken        = 1U;
 static PuglView*                puglBrowserOfferView     = NULL;
@@ -231,6 +232,129 @@ EM_JS(void, puglBrowserUninstallDrop, (const char* selector), {
   element.removeEventListener('dragover', handlers.offer, false);
   element.removeEventListener('drop', handlers.drop, false);
   delete element.__puglDrop;
+});
+
+EM_JS(int, puglBrowserSetCursor, (const char* selector, int cursor), {
+  const element = document.querySelector(UTF8ToString(selector));
+  if (!element) {
+    return 0;
+  }
+
+  const cursors = [
+    'default',
+    'text',
+    'crosshair',
+    'pointer',
+    'not-allowed',
+    'ew-resize',
+    'ns-resize',
+    'nwse-resize',
+    'nesw-resize',
+    'all-scroll',
+  ];
+
+  if (cursor < 0 || cursor >= cursors.length) {
+    return 0;
+  }
+
+  element.style.cursor = cursors[cursor];
+  return 1;
+});
+
+
+EM_JS(int,
+      puglBrowserInstallFullscreen,
+      (const char* selector, uintptr_t token), {
+  if (typeof document === 'undefined') {
+    return 0;
+  }
+
+  const element = document.querySelector(UTF8ToString(selector));
+  if (!element || element.__puglFullscreen) {
+    return 0;
+  }
+
+  const changed = Module['_puglEmscriptenFullscreenChanged'];
+  if (typeof changed !== 'function') {
+    return 0;
+  }
+
+  const handler = () => {
+    changed(token, document.fullscreenElement === element ? 1 : 0);
+  };
+
+  document.addEventListener('fullscreenchange', handler, false);
+  element.__puglFullscreen = handler;
+  return 1;
+});
+
+EM_JS(void, puglBrowserUninstallFullscreen, (const char* selector), {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const element = document.querySelector(UTF8ToString(selector));
+  const handler = element ? element.__puglFullscreen : null;
+  if (!element || !handler) {
+    return;
+  }
+
+  document.removeEventListener('fullscreenchange', handler, false);
+  delete element.__puglFullscreen;
+});
+
+EM_JS(int, puglBrowserSetFullscreen, (const char* selector, int fullscreen), {
+  if (typeof document === 'undefined') {
+    return 0;
+  }
+
+  const element = document.querySelector(UTF8ToString(selector));
+  if (!element) {
+    return 0;
+  }
+
+  if (fullscreen) {
+    if (document.fullscreenElement === element) {
+      return 1;
+    }
+
+    if (document.fullscreenElement) {
+      return 0;
+    }
+
+    if (document.fullscreenEnabled === false ||
+        typeof element.requestFullscreen !== 'function') {
+      return -1;
+    }
+
+    try {
+      const result = element.requestFullscreen();
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {});
+      }
+      return 1;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  if (document.fullscreenElement !== element) {
+    return 1;
+  }
+
+  if (typeof document.exitFullscreen !== 'function') {
+    return -1;
+  }
+
+  try {
+    const result = document.exitFullscreen();
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => {});
+    }
+    return 1;
+  } catch (_) {
+    return 0;
+  }
 });
 
 static PuglBrowserTimer*
@@ -611,28 +735,34 @@ puglCreateDomView(const PuglView* const view,
                   const PuglPoint       position,
                   const PuglArea        size)
 {
-  char script[1024] = {0};
+  char script[1280] = {0};
   snprintf(script,
            sizeof(script),
            "(()=>{if(typeof document==='undefined'||!document.body)return 0;"
            "const id='pugl-view-%" PRIuPTR "';"
            "if(document.getElementById(id))return 0;"
+           "const p='%" PRIuPTR "';"
+           "const host=p!=='0'?document.querySelector('[data-pugl-native-view=\"'+p+'\"]'):document.body;"
+           "if(!host)return 0;"
            "const e=document.createElement('canvas');"
            "e.id=id;e.dataset.puglView='%" PRIuPTR "';e.tabIndex=0;"
            "e.style.boxSizing='border-box';e.style.display='none';"
            "e.style.position='absolute';e.style.left='%dpx';e.style.top='%dpx';"
            "e.style.width='%upx';e.style.height='%upx';e.style.outline='none';"
+           "if(%d){e.style.resize='both';e.style.overflow='hidden';}"
            "const r=(typeof window!=='undefined'&&window.devicePixelRatio>0)"
            "?window.devicePixelRatio:1;"
            "e.width=Math.max(1,Math.round(%u*r));"
            "e.height=Math.max(1,Math.round(%u*r));"
-           "document.body.appendChild(e);return 1;})()",
+           "host.appendChild(e);return 1;})()",
            view->impl->id,
+           (uintptr_t)view->parent,
            view->impl->id,
            position.x,
            position.y,
            size.width,
            size.height,
+           view->hints[PUGL_RESIZABLE] == PUGL_TRUE,
            size.width,
            size.height);
   return emscripten_run_script_int(script) != 0;
@@ -690,6 +820,63 @@ puglSetDomGeometry(const PuglView* const view,
   emscripten_run_script(script);
 }
 
+static bool
+puglSetDomSizeConstraint(const PuglView* const view,
+                         const PuglSizeHint    hint,
+                         const PuglArea        area)
+{
+  const char* const prefix = hint == PUGL_MIN_SIZE ? "min" : "max";
+  char              script[512] = {0};
+
+  if (puglIsValidArea(area)) {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.%sWidth='%upx';"
+             "e.style.%sHeight='%upx';return 1;})()",
+             view->impl->id,
+             prefix,
+             area.width,
+             prefix,
+             area.height);
+  } else {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.%sWidth='';"
+             "e.style.%sHeight='';return 1;})()",
+             view->impl->id,
+             prefix,
+             prefix);
+  }
+
+  return emscripten_run_script_int(script) != 0;
+}
+
+static bool
+puglSetDomAspectRatio(const PuglView* const view, const PuglArea area)
+{
+  char script[512] = {0};
+
+  if (puglIsValidArea(area)) {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.aspectRatio='%u / %u';return 1;})()",
+             view->impl->id,
+             area.width,
+             area.height);
+  } else {
+    snprintf(script,
+             sizeof(script),
+             "(()=>{const e=document.getElementById('pugl-view-%" PRIuPTR
+             "');if(!e)return 0;e.style.aspectRatio='';return 1;})()",
+             view->impl->id);
+  }
+
+  return emscripten_run_script_int(script) != 0;
+}
+
 static int
 puglGetBrowserDimension(const char* const name)
 {
@@ -717,6 +904,50 @@ puglDispatchConfigure(PuglView* const view, const PuglViewStyleFlags style)
   event.configure.style  = style;
 
   return puglDispatchEvent(view, &event);
+}
+
+
+static PuglStatus
+puglDispatchStyleConfigure(PuglView* const view,
+                           const PuglViewStyleFlags style)
+{
+  PuglEvent event = {0};
+  if (view->lastConfigure.type == PUGL_CONFIGURE) {
+    event.configure = view->lastConfigure;
+  } else {
+    const PuglArea  size  = puglGetInitialSize(view);
+    const PuglPoint point = puglGetInitialPosition(view, size);
+    event.configure.x      = point.x;
+    event.configure.y      = point.y;
+    event.configure.width  = size.width;
+    event.configure.height = size.height;
+  }
+
+  event.configure.type  = PUGL_CONFIGURE;
+  event.configure.flags = 0U;
+  event.configure.style = style;
+  return puglDispatchEvent(view, &event);
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT void
+puglEmscriptenFullscreenChanged(const uintptr_t token, const int fullscreen)
+{
+  PuglView* const view = (PuglView*)token;
+  if (!view || !view->impl || !view->impl->id) {
+    return;
+  }
+
+  const PuglViewStyleFlags oldStyle =
+    view->lastConfigure.type == PUGL_CONFIGURE
+      ? view->lastConfigure.style
+      : (view->impl->mapped ? PUGL_VIEW_STYLE_MAPPED
+                            : PUGL_VIEW_STYLE_HIDDEN);
+  const PuglViewStyleFlags newStyle =
+    fullscreen ? oldStyle | PUGL_VIEW_STYLE_FULLSCREEN
+               : oldStyle & ~PUGL_VIEW_STYLE_FULLSCREEN;
+  if (newStyle != oldStyle) {
+    (void)puglDispatchStyleConfigure(view, newStyle);
+  }
 }
 
 static PuglArea
@@ -820,9 +1051,31 @@ puglGetAncestorCenter(const PuglView* const view)
 PuglStatus
 puglApplySizeHint(PuglView* const view, const PuglSizeHint hint)
 {
-  (void)view;
-  (void)hint;
-  return PUGL_SUCCESS;
+  if (!view || !view->impl) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (hint == PUGL_MIN_ASPECT || hint == PUGL_MAX_ASPECT) {
+    return PUGL_UNSUPPORTED;
+  }
+
+  if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE &&
+      hint != PUGL_FIXED_ASPECT) {
+    return PUGL_SUCCESS;
+  }
+
+  if (!view->impl->id) {
+    return PUGL_SUCCESS;
+  }
+
+  if (hint == PUGL_FIXED_ASPECT) {
+    return puglSetDomAspectRatio(view, view->sizeHints[hint]) ? PUGL_SUCCESS
+                                                              : PUGL_FAILURE;
+  }
+
+  return puglSetDomSizeConstraint(view, hint, view->sizeHints[hint])
+           ? PUGL_SUCCESS
+           : PUGL_FAILURE;
 }
 
 PuglStatus
@@ -845,7 +1098,11 @@ puglRealize(PuglView* const view)
   const PuglArea  size = puglGetInitialSize(view);
   const PuglPoint pos  = puglGetInitialPosition(view, size);
 
-  impl->id = view->world->impl->nextViewId++;
+  impl->id = puglNextDomViewId++;
+  if (!impl->id) {
+    impl->id = puglNextDomViewId++;
+  }
+
   snprintf(impl->canvasSelector,
            sizeof(impl->canvasSelector),
            "#pugl-view-%" PRIuPTR,
@@ -854,6 +1111,14 @@ puglRealize(PuglView* const view)
   if (!puglCreateDomView(view, pos, size)) {
     impl->id = 0U;
     return PUGL_REALIZE_FAILED;
+  }
+
+  if ((st = puglApplySizeHint(view, PUGL_MIN_SIZE)) ||
+      (st = puglApplySizeHint(view, PUGL_MAX_SIZE)) ||
+      (st = puglApplySizeHint(view, PUGL_FIXED_ASPECT))) {
+    puglDestroyDomView(impl->id);
+    impl->id = 0U;
+    return st;
   }
 
   if ((st = view->backend->create(view))) {
@@ -869,7 +1134,16 @@ puglRealize(PuglView* const view)
     return st;
   }
 
+  if (!puglBrowserInstallFullscreen(impl->canvasSelector, (uintptr_t)view)) {
+    puglEmscriptenUnregisterInput(view);
+    view->backend->destroy(view);
+    puglDestroyDomView(impl->id);
+    impl->id = 0U;
+    return PUGL_REGISTRATION_FAILED;
+  }
+
   if ((st = puglInstallBrowserDrop(view))) {
+    puglBrowserUninstallFullscreen(impl->canvasSelector);
     puglEmscriptenUnregisterInput(view);
     view->backend->destroy(view);
     puglDestroyDomView(impl->id);
@@ -880,6 +1154,7 @@ puglRealize(PuglView* const view)
   st = puglDispatchSimpleEvent(view, PUGL_REALIZE);
   if (st) {
     puglUninstallBrowserDrop(view);
+    puglBrowserUninstallFullscreen(impl->canvasSelector);
     puglEmscriptenUnregisterInput(view);
     view->backend->destroy(view);
     puglDestroyDomView(impl->id);
@@ -902,6 +1177,7 @@ puglUnrealize(PuglView* const view)
   puglClearBrowserTimers(view);
   puglClearBrowserPasteRequests(view);
   puglUninstallBrowserDrop(view);
+  puglBrowserUninstallFullscreen(impl->canvasSelector);
   puglEmscriptenUnregisterInput(view);
   view->backend->destroy(view);
   puglDestroyDomView(id);
@@ -917,8 +1193,6 @@ puglUnrealize(PuglView* const view)
 PuglStatus
 puglShow(PuglView* const view, const PuglShowCommand command)
 {
-  (void)command;
-
   PuglInternals* const impl = view ? view->impl : NULL;
   if (!impl) {
     return PUGL_BAD_PARAMETER;
@@ -938,7 +1212,11 @@ puglShow(PuglView* const view, const PuglShowCommand command)
     }
   }
 
-  return st;
+  if (st) {
+    return st;
+  }
+
+  return command == PUGL_SHOW_PASSIVE ? PUGL_SUCCESS : PUGL_FAILURE;
 }
 
 PuglStatus
@@ -954,6 +1232,14 @@ puglHide(PuglView* const view)
   }
 
   if (impl->mapped) {
+    if (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) {
+      const int fullscreenStatus =
+        puglBrowserSetFullscreen(impl->canvasSelector, 0);
+      if (fullscreenStatus <= 0) {
+        return fullscreenStatus < 0 ? PUGL_UNSUPPORTED : PUGL_FAILURE;
+      }
+    }
+
     impl->mapped = false;
     puglSetDomVisible(impl->id, false);
     return puglDispatchConfigure(view, PUGL_VIEW_STYLE_HIDDEN);
@@ -965,16 +1251,52 @@ puglHide(PuglView* const view)
 PuglStatus
 puglSetViewStyle(PuglView* const view, const PuglViewStyleFlags flags)
 {
-  const PuglViewStyleFlags supported =
-    PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_HIDDEN;
+  const PuglViewStyleFlags supported = PUGL_VIEW_STYLE_MAPPED |
+                                       PUGL_VIEW_STYLE_HIDDEN |
+                                       PUGL_VIEW_STYLE_FULLSCREEN;
+
+  if (!view || !view->impl) {
+    return PUGL_BAD_PARAMETER;
+  }
 
   if (flags & ~supported) {
     return PUGL_UNSUPPORTED;
   }
 
-  return (flags & PUGL_VIEW_STYLE_HIDDEN) ? puglHide(view)
-         : (flags & PUGL_VIEW_STYLE_MAPPED) ? puglShow(view, PUGL_SHOW_PASSIVE)
-                                            : PUGL_SUCCESS;
+  if ((flags & PUGL_VIEW_STYLE_HIDDEN) &&
+      (flags & PUGL_VIEW_STYLE_FULLSCREEN)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglStatus st = PUGL_SUCCESS;
+  if (flags & PUGL_VIEW_STYLE_HIDDEN) {
+    st = puglHide(view);
+  } else if (flags &
+             (PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_FULLSCREEN)) {
+    st = puglShow(view, PUGL_SHOW_PASSIVE);
+  }
+
+  if (st) {
+    return st;
+  }
+
+  const bool wantFullscreen =
+    (flags & PUGL_VIEW_STYLE_FULLSCREEN) != 0U;
+  const bool haveFullscreen =
+    (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) != 0U;
+  if (wantFullscreen == haveFullscreen) {
+    return PUGL_SUCCESS;
+  }
+
+  if (!view->impl->id) {
+    return PUGL_FAILURE;
+  }
+
+  const int result = puglBrowserSetFullscreen(
+    view->impl->canvasSelector, wantFullscreen ? 1 : 0);
+  return result > 0 ? PUGL_SUCCESS
+         : result < 0 ? PUGL_UNSUPPORTED
+                      : PUGL_FAILURE;
 }
 
 PuglStatus
@@ -1185,9 +1507,17 @@ puglApplyViewString(PuglView* const      view,
                     const char* const    value)
 {
   (void)view;
-  (void)key;
-  (void)value;
-  return PUGL_SUCCESS;
+
+  switch (key) {
+  case PUGL_APPLICATION_NAME:
+  case PUGL_CLASS_NAME:
+    return PUGL_UNSUPPORTED;
+  case PUGL_WINDOW_TITLE:
+    emscripten_set_window_title((char*)(value ? value : ""));
+    return PUGL_SUCCESS;
+  }
+
+  return PUGL_UNSUPPORTED;
 }
 
 double
@@ -1238,11 +1568,19 @@ puglSetWindowSize(PuglView* const view,
 PuglStatus
 puglSetTransientParent(PuglView* const view, const PuglNativeView parent)
 {
+  if (!view) {
+    return PUGL_BAD_PARAMETER;
+  }
+
   if (view->parent) {
     return PUGL_FAILURE;
   }
 
-  view->transientParent = parent;
+  if (parent) {
+    return PUGL_UNSUPPORTED;
+  }
+
+  view->transientParent = 0U;
   return PUGL_SUCCESS;
 }
 
@@ -1533,7 +1871,15 @@ puglGetClipboard(PuglView* const     view,
 PuglStatus
 puglSetCursor(PuglView* const view, const PuglCursor cursor)
 {
-  (void)view;
-  (void)cursor;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || (unsigned)cursor >= PUGL_NUM_CURSORS) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (!view->impl->id) {
+    return PUGL_FAILURE;
+  }
+
+  return puglBrowserSetCursor(view->impl->canvasSelector, (int)cursor)
+           ? PUGL_SUCCESS
+           : PUGL_FAILURE;
 }
