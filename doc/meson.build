@@ -1,4 +1,4 @@
-# Copyright 2021-2025 David Robillard <d@drobilla.net>
+# Copyright 2021-2026 David Robillard <d@drobilla.net>
 # SPDX-License-Identifier: 0BSD OR ISC
 
 docdir = get_option('datadir') / 'doc'
@@ -35,6 +35,7 @@ if build_docs
   rst_files_src = files(
     'clipboards.rst',
     'deployment.rst',
+    'emscripten.rst',
     'event-loop.rst',
     'events.rst',
     'index.rst',

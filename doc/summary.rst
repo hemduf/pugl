@@ -7,11 +7,12 @@ since it has no implicit context or mutable static data,
 and can be statically linked.
 The "core" library implements platform support,
 and depends only on standard system libraries.
-MacOS, Windows, and X11 are currently supported.
+MacOS, Windows, X11, and WebAssembly/Emscripten are currently supported.
 
 Graphics backends are built as separate libraries,
 so applications depend only on the APIs that they use.
-Pugl includes graphics backends for Cairo_, OpenGL_, and Vulkan_.
+Pugl includes graphics backends for Cairo_, OpenGL_, and Vulkan_ on supported
+native platforms, and maps the OpenGL backend to WebGL on Emscripten.
 Other graphics APIs can be used by implementing a custom backend.
 
 .. _Cairo: https://www.cairographics.org/
