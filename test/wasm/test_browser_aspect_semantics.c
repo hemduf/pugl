@@ -70,14 +70,52 @@ puglTestFixedAspectContract(void)
   return fixedAspect;
 }
 
+static bool
+puglTestRaiseContract(void)
+{
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const view = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
+  }
+
+  puglSetBackend(view, puglStubBackend());
+  puglSetEventFunc(view, puglTestIgnoreAspectEvent);
+  puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 48U, 32U);
+
+  const PuglStatus raiseStatus = puglShow(view, PUGL_SHOW_RAISE);
+  const bool shownButNotRaised = raiseStatus == PUGL_FAILURE &&
+                                 puglGetNativeView(view) != 0U &&
+                                 puglGetVisible(view);
+
+  if (puglGetNativeView(view)) {
+    (void)puglUnrealize(view);
+  }
+  puglFreeView(view);
+  puglFreeWorld(world);
+
+  if (!shownButNotRaised) {
+    fprintf(stderr,
+            "Browser raise requests must show the view but report PUGL_FAILURE\n");
+  }
+
+  return shownButNotRaised;
+}
+
 static void
 puglRunBrowserAspectSemantics(void* const data)
 {
   (void)data;
 
-  if (!puglTestFixedAspectContract()) {
+  if (!puglTestFixedAspectContract() || !puglTestRaiseContract()) {
     emscripten_run_script(
-      "throw new Error('Browser aspect-ratio semantics contract failed')");
+      "throw new Error('Browser aspect/style semantics contract failed')");
   }
 }
 
