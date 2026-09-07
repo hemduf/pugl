@@ -96,6 +96,10 @@ def exercise_pugl_input(page: object) -> None:
     finally:
         page.keyboard.up("Shift")
 
+    page.keyboard.press("Tab")
+    if not text_input.evaluate("element => document.activeElement === element"):
+        raise RuntimeError("Tab moved browser focus away from the Pugl view")
+
     finish_result = page.evaluate(
         """
         () => {
