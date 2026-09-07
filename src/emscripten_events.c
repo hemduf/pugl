@@ -666,7 +666,7 @@ puglKeyCallback(const int                            eventType,
                                            : browserEvent->keyCode;
   event.key.key     = (uint32_t)key;
   (void)puglDispatchEvent(view, &event);
-  return false;
+  return eventType == EMSCRIPTEN_EVENT_KEYDOWN && special == PUGL_KEY_TAB;
 }
 
 static bool
@@ -997,7 +997,6 @@ puglEmscriptenUnregisterInput(PuglView* const view)
   if (!binding || !binding->view) {
     return;
   }
-
   binding->view = NULL;
 
   char inputSelector[PUGL_BROWSER_INPUT_SELECTOR_SIZE] = {0};
