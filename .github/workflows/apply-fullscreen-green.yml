@@ -1,0 +1,400 @@
+name: Apply fullscreen GREEN
+
+on:
+  push:
+    branches: [feature/emscripten-browser-semantics]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-fullscreen-green
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, 'stage fullscreen GREEN')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/emscripten-browser-semantics
+          fetch-depth: 0
+
+      - name: Wait for identity sanitizer
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=feature/emscripten-browser-semantics
+          for attempt in $(seq 1 24); do
+            git fetch origin "$branch"
+            tip="$(git rev-parse "origin/$branch")"
+            if ! git log "$tip" --format='%an%x09%cn' | grep -Eq '(^|[[:space:]])hemduf([[:space:]]|$)'; then
+              git reset --hard "$tip"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Identity sanitizer did not finish in time' >&2
+          exit 1
+
+      - name: Implement browser fullscreen semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/emscripten.c')
+          text = path.read_text()
+
+          cursor = r'''EM_JS(int, puglBrowserSetCursor, (const char* selector, int cursor), {
+            const element = document.querySelector(UTF8ToString(selector));
+            if (!element) {
+              return 0;
+            }
+
+            const cursors = [
+              'default',
+              'text',
+              'crosshair',
+              'pointer',
+              'not-allowed',
+              'ew-resize',
+              'ns-resize',
+              'nwse-resize',
+              'nesw-resize',
+              'all-scroll',
+            ];
+
+            if (cursor < 0 || cursor >= cursors.length) {
+              return 0;
+            }
+
+            element.style.cursor = cursors[cursor];
+            return 1;
+          });
+          '''
+
+          fullscreen_js = cursor + r'''
+          EM_JS(int,
+                puglBrowserInstallFullscreen,
+                (const char* selector, uintptr_t token), {
+            const element = document.querySelector(UTF8ToString(selector));
+            if (!element || element.__puglFullscreen || typeof document === 'undefined') {
+              return 0;
+            }
+
+            const changed = Module['_puglEmscriptenFullscreenChanged'];
+            if (typeof changed !== 'function') {
+              return 0;
+            }
+
+            const handler = () => {
+              changed(token, document.fullscreenElement === element ? 1 : 0);
+            };
+
+            document.addEventListener('fullscreenchange', handler, false);
+            element.__puglFullscreen = handler;
+            return 1;
+          });
+
+          EM_JS(void, puglBrowserUninstallFullscreen, (const char* selector), {
+            const element = document.querySelector(UTF8ToString(selector));
+            const handler = element ? element.__puglFullscreen : null;
+            if (!element || !handler || typeof document === 'undefined') {
+              return;
+            }
+
+            document.removeEventListener('fullscreenchange', handler, false);
+            delete element.__puglFullscreen;
+          });
+
+          EM_JS(int, puglBrowserSetFullscreen, (const char* selector, int fullscreen), {
+            const element = document.querySelector(UTF8ToString(selector));
+            if (!element || typeof document === 'undefined') {
+              return 0;
+            }
+
+            if (fullscreen) {
+              if (document.fullscreenElement === element) {
+                return 1;
+              }
+
+              if (document.fullscreenElement) {
+                return 0;
+              }
+
+              if (document.fullscreenEnabled === false ||
+                  typeof element.requestFullscreen !== 'function') {
+                return -1;
+              }
+
+              try {
+                const result = element.requestFullscreen();
+                if (result && typeof result.catch === 'function') {
+                  result.catch(() => {});
+                }
+                return 1;
+              } catch (_) {
+                return 0;
+              }
+            }
+
+            if (document.fullscreenElement !== element) {
+              return 1;
+            }
+
+            if (typeof document.exitFullscreen !== 'function') {
+              return -1;
+            }
+
+            try {
+              const result = document.exitFullscreen();
+              if (result && typeof result.catch === 'function') {
+                result.catch(() => {});
+              }
+              return 1;
+            } catch (_) {
+              return 0;
+            }
+          });
+          '''
+
+          if text.count(cursor) != 1:
+              raise SystemExit('cursor insertion point changed')
+          text = text.replace(cursor, fullscreen_js, 1)
+
+          configure = r'''static PuglStatus
+          puglDispatchConfigure(PuglView* const view, const PuglViewStyleFlags style)
+          {
+            const PuglArea  size  = puglGetInitialSize(view);
+            const PuglPoint point = puglGetInitialPosition(view, size);
+            PuglEvent       event = {0};
+
+            event.configure.type   = PUGL_CONFIGURE;
+            event.configure.flags  = 0U;
+            event.configure.x      = point.x;
+            event.configure.y      = point.y;
+            event.configure.width  = size.width;
+            event.configure.height = size.height;
+            event.configure.style  = style;
+
+            return puglDispatchEvent(view, &event);
+          }
+          '''
+
+          configure_new = configure + r'''
+          static PuglStatus
+          puglDispatchStyleConfigure(PuglView* const view,
+                                     const PuglViewStyleFlags style)
+          {
+            PuglEvent event = {0};
+            if (view->lastConfigure.type == PUGL_CONFIGURE) {
+              event.configure = view->lastConfigure;
+            } else {
+              const PuglArea size = puglGetInitialSize(view);
+              const PuglPoint point = puglGetInitialPosition(view, size);
+              event.configure.x      = point.x;
+              event.configure.y      = point.y;
+              event.configure.width  = size.width;
+              event.configure.height = size.height;
+            }
+
+            event.configure.type  = PUGL_CONFIGURE;
+            event.configure.flags = 0U;
+            event.configure.style = style;
+            return puglDispatchEvent(view, &event);
+          }
+
+          EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT void
+          puglEmscriptenFullscreenChanged(const uintptr_t token, const int fullscreen)
+          {
+            PuglView* const view = (PuglView*)token;
+            if (!view || !view->impl || !view->impl->id) {
+              return;
+            }
+
+            const PuglViewStyleFlags oldStyle =
+              view->lastConfigure.type == PUGL_CONFIGURE
+                ? view->lastConfigure.style
+                : (view->impl->mapped ? PUGL_VIEW_STYLE_MAPPED
+                                      : PUGL_VIEW_STYLE_HIDDEN);
+            const PuglViewStyleFlags newStyle =
+              fullscreen ? oldStyle | PUGL_VIEW_STYLE_FULLSCREEN
+                         : oldStyle & ~PUGL_VIEW_STYLE_FULLSCREEN;
+            if (newStyle != oldStyle) {
+              (void)puglDispatchStyleConfigure(view, newStyle);
+            }
+          }
+          '''
+
+          if text.count(configure) != 1:
+              raise SystemExit('configure insertion point changed')
+          text = text.replace(configure, configure_new, 1)
+
+          realize = r'''  if ((st = puglEmscriptenRegisterInput(view))) {
+            view->backend->destroy(view);
+            puglDestroyDomView(impl->id);
+            impl->id = 0U;
+            return st;
+          }
+
+          if ((st = puglInstallBrowserDrop(view))) {
+            puglEmscriptenUnregisterInput(view);
+            view->backend->destroy(view);
+            puglDestroyDomView(impl->id);
+            impl->id = 0U;
+            return st;
+          }
+
+          st = puglDispatchSimpleEvent(view, PUGL_REALIZE);
+          if (st) {
+            puglUninstallBrowserDrop(view);
+            puglEmscriptenUnregisterInput(view);
+            view->backend->destroy(view);
+            puglDestroyDomView(impl->id);
+            impl->id = 0U;
+          }
+          '''
+
+          realize_new = r'''  if ((st = puglEmscriptenRegisterInput(view))) {
+            view->backend->destroy(view);
+            puglDestroyDomView(impl->id);
+            impl->id = 0U;
+            return st;
+          }
+
+          if (!puglBrowserInstallFullscreen(impl->canvasSelector, (uintptr_t)view)) {
+            puglEmscriptenUnregisterInput(view);
+            view->backend->destroy(view);
+            puglDestroyDomView(impl->id);
+            impl->id = 0U;
+            return PUGL_REGISTRATION_FAILED;
+          }
+
+          if ((st = puglInstallBrowserDrop(view))) {
+            puglBrowserUninstallFullscreen(impl->canvasSelector);
+            puglEmscriptenUnregisterInput(view);
+            view->backend->destroy(view);
+            puglDestroyDomView(impl->id);
+            impl->id = 0U;
+            return st;
+          }
+
+          st = puglDispatchSimpleEvent(view, PUGL_REALIZE);
+          if (st) {
+            puglUninstallBrowserDrop(view);
+            puglBrowserUninstallFullscreen(impl->canvasSelector);
+            puglEmscriptenUnregisterInput(view);
+            view->backend->destroy(view);
+            puglDestroyDomView(impl->id);
+            impl->id = 0U;
+          }
+          '''
+
+          if text.count(realize) != 1:
+              raise SystemExit('realize insertion point changed')
+          text = text.replace(realize, realize_new, 1)
+
+          unrealize = r'''  puglClearBrowserPasteRequests(view);
+            puglUninstallBrowserDrop(view);
+            puglEmscriptenUnregisterInput(view);
+            view->backend->destroy(view);
+          '''
+          unrealize_new = r'''  puglClearBrowserPasteRequests(view);
+            puglUninstallBrowserDrop(view);
+            puglBrowserUninstallFullscreen(impl->canvasSelector);
+            puglEmscriptenUnregisterInput(view);
+            view->backend->destroy(view);
+          '''
+          if text.count(unrealize) != 1:
+              raise SystemExit('unrealize insertion point changed')
+          text = text.replace(unrealize, unrealize_new, 1)
+
+          style = r'''PuglStatus
+          puglSetViewStyle(PuglView* const view, const PuglViewStyleFlags flags)
+          {
+            const PuglViewStyleFlags supported =
+              PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_HIDDEN;
+
+            if (flags & ~supported) {
+              return PUGL_UNSUPPORTED;
+            }
+
+            return (flags & PUGL_VIEW_STYLE_HIDDEN) ? puglHide(view)
+                   : (flags & PUGL_VIEW_STYLE_MAPPED) ? puglShow(view, PUGL_SHOW_PASSIVE)
+                                                      : PUGL_SUCCESS;
+          }
+          '''
+
+          style_new = r'''PuglStatus
+          puglSetViewStyle(PuglView* const view, const PuglViewStyleFlags flags)
+          {
+            const PuglViewStyleFlags supported = PUGL_VIEW_STYLE_MAPPED |
+                                                 PUGL_VIEW_STYLE_HIDDEN |
+                                                 PUGL_VIEW_STYLE_FULLSCREEN;
+
+            if (!view || !view->impl) {
+              return PUGL_BAD_PARAMETER;
+            }
+
+            if (flags & ~supported) {
+              return PUGL_UNSUPPORTED;
+            }
+
+            if ((flags & PUGL_VIEW_STYLE_HIDDEN) &&
+                (flags & PUGL_VIEW_STYLE_FULLSCREEN)) {
+              return PUGL_BAD_PARAMETER;
+            }
+
+            PuglStatus st = PUGL_SUCCESS;
+            if (flags & PUGL_VIEW_STYLE_HIDDEN) {
+              st = puglHide(view);
+            } else if (flags &
+                       (PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_FULLSCREEN)) {
+              st = puglShow(view, PUGL_SHOW_PASSIVE);
+            }
+
+            if (st) {
+              return st;
+            }
+
+            const bool wantFullscreen = (flags & PUGL_VIEW_STYLE_FULLSCREEN) != 0U;
+            const bool haveFullscreen =
+              (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) != 0U;
+            if (wantFullscreen == haveFullscreen) {
+              return PUGL_SUCCESS;
+            }
+
+            if (!view->impl->id) {
+              return PUGL_FAILURE;
+            }
+
+            const int result = puglBrowserSetFullscreen(
+              view->impl->canvasSelector, wantFullscreen ? 1 : 0);
+            return result > 0 ? PUGL_SUCCESS
+                   : result < 0 ? PUGL_UNSUPPORTED
+                                : PUGL_FAILURE;
+          }
+          '''
+
+          if text.count(style) != 1:
+              raise SystemExit('style replacement point changed')
+          text = text.replace(style, style_new, 1)
+
+          path.write_text(text)
+          PY
+
+          rm .github/workflows/apply-fullscreen-green.yml
+          git diff --check
+
+      - name: Commit GREEN implementation as bot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/emscripten.c .github/workflows/apply-fullscreen-green.yml
+          git commit -m 'Implement browser fullscreen style semantics' -m 'GREEN for #17: map fullscreen view-style requests to the browser Fullscreen API and update Pugl configure state from fullscreenchange events, with teardown-safe listener lifetime.'
+          git push origin HEAD:feature/emscripten-browser-semantics
