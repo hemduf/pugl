@@ -86,9 +86,13 @@ jobs:
       - name: Build
         run: meson compile -C build
       - name: Test
-        # Run the complete native suite serially so timing-sensitive upstream
-        # timer checks are not perturbed by concurrent GUI tests on hosted VMs.
-        run: meson test -C build --print-errorlogs --num-processes 1
+        # Keep the complete upstream suite and its timing assertions unchanged.
+        # The hosted ARM image enables kernel timer coalescing for power savings,
+        # which can batch Pugl's 60 Hz NSTimer qualification into a 30 Hz cadence.
+        # Disable that host policy for qualification and keep the process awake.
+        run: |
+          sudo sysctl -w kern.timer.coalescing_enabled=0
+          caffeinate -dimsu meson test -C build --print-errorlogs --num-processes 1
 
   windows:
     name: Windows
