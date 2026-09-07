@@ -20,6 +20,7 @@ env:
   PYTHON_VERSION: '3.13'
   MESON_VERSION: '1.11.2'
   NINJA_VERSION: '1.13.2'
+  PLAYWRIGHT_VERSION: '1.62.0'
 
 jobs:
   linux:
@@ -137,7 +138,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install build tools
-        run: python -m pip install "meson==${MESON_VERSION}" "ninja==${NINJA_VERSION}"
+        run: >-
+          python -m pip install
+          "meson==${MESON_VERSION}"
+          "ninja==${NINJA_VERSION}"
+          "playwright==${PLAYWRIGHT_VERSION}"
       - name: Set up Emscripten
         uses: emscripten-core/setup-emsdk@v16
         with:
@@ -218,3 +223,30 @@ jobs:
             -Dpugl:tests=disabled \
             -Dpugl:vulkan=disabled
           meson compile -C consumer-build
+      - name: Install headless Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Verify browser harness rejects failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          page=build-wasm/test/wasm/pugl_wasm_harness.html
+          test -f "$page"
+          if python scripts/run_wasm_browser_test.py \
+            "$page" \
+            --query fail=1 \
+            --diagnostics-dir build-wasm/browser-diagnostics/self-test; then
+            echo "Browser harness failed to reject an intentional failure" >&2
+            exit 1
+          fi
+      - name: Run browser harness
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_harness.html
+          --diagnostics-dir build-wasm/browser-diagnostics/smoke
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-browser-diagnostics
+          path: build-wasm/browser-diagnostics
+          if-no-files-found: ignore
