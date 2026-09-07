@@ -1,0 +1,68 @@
+name: Apply hide fullscreen GREEN
+
+on:
+  push:
+    branches: [feature/emscripten-browser-semantics]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-hide-fullscreen-green
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, 'stage hide fullscreen GREEN')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/emscripten-browser-semantics
+          fetch-depth: 0
+
+      - name: Wait for identity sanitizer
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=feature/emscripten-browser-semantics
+          for attempt in $(seq 1 24); do
+            git fetch origin "$branch"
+            tip="$(git rev-parse "origin/$branch")"
+            if ! git log "$tip" --format='%an%x09%cn' | grep -Eq '(^|[[:space:]])hemduf([[:space:]]|$)'; then
+              git reset --hard "$tip"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Identity sanitizer did not finish in time' >&2
+          exit 1
+
+      - name: Fix hide fullscreen semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/emscripten.c')
+          text = path.read_text()
+          old = '''  if (impl->mapped) {\n    impl->mapped = false;\n    puglSetDomVisible(impl->id, false);\n    return puglDispatchConfigure(view, PUGL_VIEW_STYLE_HIDDEN);\n  }\n\n  return PUGL_SUCCESS;\n}\n\nPuglStatus\npuglSetViewStyle'''
+          new = '''  if (impl->mapped) {\n    if (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) {\n      const int fullscreenStatus =\n        puglBrowserSetFullscreen(impl->canvasSelector, 0);\n      if (fullscreenStatus <= 0) {\n        return fullscreenStatus < 0 ? PUGL_UNSUPPORTED : PUGL_FAILURE;\n      }\n    }\n\n    impl->mapped = false;\n    puglSetDomVisible(impl->id, false);\n    return puglDispatchConfigure(view, PUGL_VIEW_STYLE_HIDDEN);\n  }\n\n  return PUGL_SUCCESS;\n}\n\nPuglStatus\npuglSetViewStyle'''
+          if text.count(old) != 1:
+              raise SystemExit('puglHide replacement point changed')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          rm .github/workflows/apply-hide-fullscreen-green.yml
+          git diff --check
+
+      - name: Commit correction as bot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/emscripten.c .github/workflows/apply-hide-fullscreen-green.yml
+          git commit -m 'Exit browser fullscreen before hiding a view' -m 'GREEN review correction for #17: request browser fullscreen exit before reporting the Pugl view hidden so DOM state and configure style cannot diverge.'
+          git push origin HEAD:feature/emscripten-browser-semantics
