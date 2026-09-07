@@ -160,7 +160,7 @@ jobs:
           -Dbindings_cpp=disabled
           -Dcairo=disabled
           -Ddocs=disabled
-          -Dexamples=disabled
+          -Dexamples=enabled
           -Dinstall=disabled
           -Dopengl=enabled
           -Dstub=true
@@ -268,6 +268,21 @@ jobs:
           build-wasm/test/wasm/pugl_wasm_webgl.html
           --passive
           --diagnostics-dir build-wasm/browser-diagnostics/webgl
+      - name: Run browser demo artifact smoke test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/examples/pugl_wasm_demo.html
+          --demo
+          --diagnostics-dir build-wasm/browser-diagnostics/demo
+      - name: Upload runnable browser demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: pugl-wasm-browser-demo
+          path: |
+            build-wasm/examples/pugl_wasm_demo.html
+            build-wasm/examples/pugl_wasm_demo.js
+            build-wasm/examples/pugl_wasm_demo.wasm
+          if-no-files-found: error
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
