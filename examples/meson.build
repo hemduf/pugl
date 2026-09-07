@@ -43,7 +43,21 @@ endif
 
 subdir('shaders')
 
-if host_machine.system() == 'darwin'
+if platform == 'emscripten'
+  # Build one focused browser demo rather than desktop-oriented example programs.
+  if opengl_dep.found()
+    executable(
+      'pugl_wasm_demo',
+      'pugl_wasm_demo.c',
+      c_args: example_defines + example_c_args,
+      dependencies: [pugl_dep, pugl_gl_dep],
+      implicit_include_directories: false,
+      link_args: ['-sEXIT_RUNTIME=0'],
+      name_suffix: 'html',
+    )
+  endif
+
+elif host_machine.system() == 'darwin'
   # On Darwin, build examples as application bundles (required to work properly)
 
   subdir('pugl_clipboard_demo.app')
@@ -134,7 +148,6 @@ else
       target = example.split('.')[0]
       dependencies = [dl_dep, pugl_vulkan_dep, puglutil_dep]
       defines = []
-
       executable(
         target,
         source,

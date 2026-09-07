@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--passive", action="store_true")
     mode.add_argument("--pugl-input", action="store_true")
+    mode.add_argument("--demo", action="store_true")
     parser.add_argument("--clipboard", action="store_true")
     parser.add_argument(
         "--diagnostics-dir",
@@ -117,6 +118,64 @@ def exercise_pugl_input(page: object) -> None:
     )
 
 
+def exercise_demo(page: object) -> None:
+    canvas = page.locator("canvas[id^='pugl-view-']")
+    if canvas.count() != 1:
+        raise RuntimeError("Expected exactly one Pugl demo canvas")
+
+    text_input = page.locator("textarea[data-pugl-text-input]")
+    if text_input.count() != 1:
+        raise RuntimeError("Expected exactly one Pugl demo text input")
+
+    page.wait_for_function(
+        "window.puglDemo && window.puglDemo.expose >= 1 && window.puglDemo.pixelOk",
+        timeout=5000,
+    )
+    initial_configure = page.evaluate("window.puglDemo.configure")
+    initial_expose = page.evaluate("window.puglDemo.expose")
+
+    text_input.focus()
+    page.keyboard.press("a")
+
+    box = canvas.bounding_box()
+    if not box:
+        raise RuntimeError("Pugl demo canvas has no bounding box")
+
+    x = box["x"] + (box["width"] / 2.0)
+    y = box["y"] + (box["height"] / 2.0)
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + 12.0, y + 8.0)
+    page.mouse.up()
+
+    page.evaluate(
+        """
+        () => {
+          const canvas = document.querySelector("canvas[id^='pugl-view-']");
+          canvas.style.width = '520px';
+          canvas.style.height = '300px';
+          window.dispatchEvent(new Event('resize'));
+        }
+        """
+    )
+
+    page.wait_for_function(
+        """
+        ([configure, expose]) =>
+          window.puglDemo &&
+          window.puglDemo.keyPress >= 1 &&
+          window.puglDemo.buttonPress >= 1 &&
+          window.puglDemo.buttonRelease >= 1 &&
+          window.puglDemo.motion >= 1 &&
+          window.puglDemo.configure > configure &&
+          window.puglDemo.expose > expose &&
+          window.puglDemo.pixelOk
+        """,
+        arg=[initial_configure, initial_expose],
+        timeout=5000,
+    )
+
+
 def main() -> int:
     args = parse_args()
     test_page = args.page.resolve()
@@ -164,6 +223,8 @@ def main() -> int:
 
                 if args.pugl_input:
                     exercise_pugl_input(page)
+                elif args.demo:
+                    exercise_demo(page)
                 elif not args.passive:
                     exercise_generic_harness(page)
 
@@ -183,6 +244,9 @@ def main() -> int:
 
                 if args.pugl_input:
                     print("Pugl input browser test passed")
+                elif args.demo:
+                    counts = page.evaluate("window.puglDemo")
+                    print(f"Pugl browser demo passed: {counts}")
                 elif args.passive:
                     print("Browser test passed")
                 else:
