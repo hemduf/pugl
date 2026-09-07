@@ -249,6 +249,12 @@ jobs:
           build-wasm/test/wasm/pugl_wasm_lifecycle.html
           --passive
           --diagnostics-dir build-wasm/browser-diagnostics/lifecycle
+      - name: Run input browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_input.html
+          --pugl-input
+          --diagnostics-dir build-wasm/browser-diagnostics/input
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
