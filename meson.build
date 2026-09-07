@@ -263,7 +263,7 @@ elif host_machine.system() == 'emscripten'
   endif
 
   platform = 'emscripten'
-  platform_sources = files('src/emscripten.c', 'src/emscripten_events.c')
+  platform_sources = files('src/emscripten.c')
   platform_args = []
   core_deps = []
   backend_extension = '.c'
@@ -417,8 +417,14 @@ endif
 
 # OpenGL Backend #
 
+gl_link_args = []
 if platform == 'emscripten'
-  opengl_dep = dependency('', required: false)
+  if get_option('opengl').disabled()
+    opengl_dep = dependency('', required: false)
+  else
+    opengl_dep = declare_dependency()
+    gl_link_args = ['-sMAX_WEBGL_VERSION=2']
+  endif
 else
   opengl_dep = dependency(
     'GL',
@@ -444,6 +450,7 @@ if opengl_dep.found()
 
   pugl_gl_dep = declare_dependency(
     compile_args: usage_args,
+    link_args: gl_link_args,
     link_with: gl_backend,
     dependencies: [pugl_dep, opengl_dep],
   )
