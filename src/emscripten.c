@@ -915,6 +915,10 @@ puglApplySizeHint(PuglView* const view, const PuglSizeHint hint)
     return PUGL_BAD_PARAMETER;
   }
 
+  if (hint == PUGL_MIN_ASPECT || hint == PUGL_MAX_ASPECT) {
+    return PUGL_UNSUPPORTED;
+  }
+
   if (hint != PUGL_MIN_SIZE && hint != PUGL_MAX_SIZE &&
       hint != PUGL_FIXED_ASPECT) {
     return PUGL_SUCCESS;
