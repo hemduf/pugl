@@ -53,6 +53,11 @@ EM_JS(int, puglTestInstallFullscreenMock, (uintptr_t nativeView), {
   return 1;
 });
 
+EM_JS(int, puglTestIsFullscreen, (uintptr_t nativeView), {
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  return !!element && document.fullscreenElement === element;
+});
+
 static PuglStatus
 puglTestFullscreenEvent(PuglView* const view, const PuglEvent* const event)
 {
@@ -102,16 +107,33 @@ puglRunBrowserFullscreenSemantics(void* const data)
       : PUGL_FAILURE;
 
   const bool entered =
-    enterStatus == PUGL_SUCCESS &&
+    enterStatus == PUGL_SUCCESS && puglTestIsFullscreen(nativeView) &&
     (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) &&
     puglBrowserFullscreenState.configureEvents > beforeEnter &&
     (puglBrowserFullscreenState.style & PUGL_VIEW_STYLE_FULLSCREEN);
 
+  const PuglStatus hideStatus = entered ? puglHide(view) : PUGL_FAILURE;
+  const bool hidden =
+    hideStatus == PUGL_SUCCESS && !puglTestIsFullscreen(nativeView) &&
+    !puglGetVisible(view) &&
+    !(puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN);
+
+  const PuglStatus reshowStatus =
+    hidden ? puglShow(view, PUGL_SHOW_PASSIVE) : PUGL_FAILURE;
+  const PuglStatus reenterStatus =
+    reshowStatus == PUGL_SUCCESS
+      ? puglSetViewStyle(
+          view, PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_FULLSCREEN)
+      : PUGL_FAILURE;
+  const bool reentered =
+    reenterStatus == PUGL_SUCCESS && puglTestIsFullscreen(nativeView) &&
+    (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN);
+
   const unsigned beforeLeave = puglBrowserFullscreenState.configureEvents;
   const PuglStatus leaveStatus =
-    entered ? puglSetViewStyle(view, PUGL_VIEW_STYLE_MAPPED) : PUGL_FAILURE;
+    reentered ? puglSetViewStyle(view, PUGL_VIEW_STYLE_MAPPED) : PUGL_FAILURE;
   const bool left =
-    leaveStatus == PUGL_SUCCESS &&
+    leaveStatus == PUGL_SUCCESS && !puglTestIsFullscreen(nativeView) &&
     !(puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) &&
     puglBrowserFullscreenState.configureEvents > beforeLeave &&
     !(puglBrowserFullscreenState.style & PUGL_VIEW_STYLE_FULLSCREEN);
@@ -126,13 +148,19 @@ puglRunBrowserFullscreenSemantics(void* const data)
   puglFreeView(view);
   puglFreeWorld(world);
 
-  if (!mockInstalled || !entered || !left || !explicitUnsupported) {
+  if (!mockInstalled || !entered || !hidden || !reentered || !left ||
+      !explicitUnsupported) {
     fprintf(stderr,
             "Browser fullscreen style contract failed: mock=%d enter=%d "
-            "entered=%d leave=%d left=%d unsupported=%d\n",
+            "entered=%d hide=%d hidden=%d reenter=%d reentered=%d "
+            "leave=%d left=%d unsupported=%d\n",
             mockInstalled,
             (int)enterStatus,
             entered,
+            (int)hideStatus,
+            hidden,
+            (int)reenterStatus,
+            reentered,
             (int)leaveStatus,
             left,
             (int)unsupportedStatus);
