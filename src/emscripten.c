@@ -1312,9 +1312,17 @@ puglApplyViewString(PuglView* const      view,
                     const char* const    value)
 {
   (void)view;
-  (void)key;
-  (void)value;
-  return PUGL_SUCCESS;
+
+  switch (key) {
+  case PUGL_APPLICATION_NAME:
+  case PUGL_CLASS_NAME:
+    return PUGL_UNSUPPORTED;
+  case PUGL_WINDOW_TITLE:
+    emscripten_set_window_title((char*)(value ? value : ""));
+    return PUGL_SUCCESS;
+  }
+
+  return PUGL_UNSUPPORTED;
 }
 
 double
