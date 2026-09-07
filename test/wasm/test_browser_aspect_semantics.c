@@ -71,6 +71,39 @@ puglTestFixedAspectContract(void)
 }
 
 static bool
+puglTestUnsupportedAspectBounds(void)
+{
+  PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
+  PuglView* const view = world ? puglNewView(world) : NULL;
+  if (!world || !view) {
+    if (view) {
+      puglFreeView(view);
+    }
+    if (world) {
+      puglFreeWorld(world);
+    }
+    return false;
+  }
+
+  const PuglStatus minStatus =
+    puglSetSizeHint(view, PUGL_MIN_ASPECT, 4U, 3U);
+  const PuglStatus maxStatus =
+    puglSetSizeHint(view, PUGL_MAX_ASPECT, 16U, 9U);
+  const bool unsupported = minStatus == PUGL_UNSUPPORTED &&
+                           maxStatus == PUGL_UNSUPPORTED;
+
+  puglFreeView(view);
+  puglFreeWorld(world);
+
+  if (!unsupported) {
+    fprintf(stderr,
+            "Browser min/max aspect hints must report PUGL_UNSUPPORTED\n");
+  }
+
+  return unsupported;
+}
+
+static bool
 puglTestRaiseContract(void)
 {
   PuglWorld* const world = puglNewWorld(PUGL_PROGRAM, 0U);
@@ -113,7 +146,8 @@ puglRunBrowserAspectSemantics(void* const data)
 {
   (void)data;
 
-  if (!puglTestFixedAspectContract() || !puglTestRaiseContract()) {
+  if (!puglTestFixedAspectContract() || !puglTestUnsupportedAspectBounds() ||
+      !puglTestRaiseContract()) {
     emscripten_run_script(
       "throw new Error('Browser aspect/style semantics contract failed')");
   }
