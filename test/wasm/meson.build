@@ -47,6 +47,7 @@ executable(
   'test_services.c',
   'test_browser_semantics.c',
   'test_browser_aspect_semantics.c',
+  'test_browser_string_semantics.c',
   c_args: test_c_args,
   dependencies: [pugl_dep, pugl_stub_dep],
   install: false,
