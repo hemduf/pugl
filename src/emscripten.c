@@ -1232,6 +1232,14 @@ puglHide(PuglView* const view)
   }
 
   if (impl->mapped) {
+    if (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) {
+      const int fullscreenStatus =
+        puglBrowserSetFullscreen(impl->canvasSelector, 0);
+      if (fullscreenStatus <= 0) {
+        return fullscreenStatus < 0 ? PUGL_UNSUPPORTED : PUGL_FAILURE;
+      }
+    }
+
     impl->mapped = false;
     puglSetDomVisible(impl->id, false);
     return puglDispatchConfigure(view, PUGL_VIEW_STYLE_HIDDEN);
