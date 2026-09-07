@@ -85,9 +85,10 @@ jobs:
       - name: Build
         run: meson compile -C build
       - name: Test
-        # Keep the complete upstream suite, but run it serially so timing-sensitive
-        # native timer tests are not perturbed by concurrent GUI tests on hosted VMs.
-        run: meson test -C build --print-errorlogs --num-processes 1
+        # Keep the complete upstream suite unchanged and serial, while holding
+        # macOS power-management assertions so hosted ARM runners do not coalesce
+        # the 60 Hz NSTimer qualification into long idle scheduling intervals.
+        run: caffeinate -dimsu meson test -C build --print-errorlogs --num-processes 1
 
   windows:
     name: Windows
