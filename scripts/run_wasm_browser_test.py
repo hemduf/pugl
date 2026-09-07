@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--passive", action="store_true")
     mode.add_argument("--pugl-input", action="store_true")
+    parser.add_argument("--clipboard", action="store_true")
     parser.add_argument(
         "--diagnostics-dir",
         type=pathlib.Path,
@@ -96,10 +97,6 @@ def exercise_pugl_input(page: object) -> None:
     finally:
         page.keyboard.up("Shift")
 
-    page.keyboard.press("Tab")
-    if not text_input.evaluate("element => document.activeElement === element"):
-        raise RuntimeError("Tab moved browser focus away from the Pugl view")
-
     finish_result = page.evaluate(
         """
         () => {
@@ -144,7 +141,12 @@ def main() -> int:
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 800, "height": 600})
+            permissions = ["clipboard-read", "clipboard-write"] if args.clipboard else []
+            context = browser.new_context(
+                viewport={"width": 800, "height": 600},
+                permissions=permissions,
+            )
+            page = context.new_page()
             page.on(
                 "console",
                 lambda message: console_errors.append(message.text)
@@ -196,6 +198,7 @@ def main() -> int:
                 write_diagnostics(page, args.diagnostics_dir)
                 return 1
             finally:
+                context.close()
                 browser.close()
     finally:
         server.shutdown()

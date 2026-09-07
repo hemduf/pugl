@@ -21,6 +21,583 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct PuglBrowserTimerImpl PuglBrowserTimer;
+typedef struct PuglBrowserPasteRequestImpl PuglBrowserPasteRequest;
+typedef struct PuglBrowserDropRegistrationImpl PuglBrowserDropRegistration;
+
+struct PuglBrowserTimerImpl {
+  PuglBrowserTimer* next;
+  PuglView*         view;
+  uintptr_t         id;
+  long              intervalId;
+};
+
+struct PuglBrowserPasteRequestImpl {
+  PuglBrowserPasteRequest* next;
+  PuglView*                view;
+  uintptr_t                token;
+  unsigned char*           data;
+  size_t                   len;
+};
+
+struct PuglBrowserDropRegistrationImpl {
+  PuglBrowserDropRegistration* next;
+  PuglView*                    view;
+  uintptr_t                    token;
+  unsigned char*               data;
+  size_t                       len;
+  bool                         installed;
+  bool                         accepted;
+};
+
+typedef struct {
+  char*          type;
+  unsigned char* data;
+  size_t         len;
+} PuglBrowserClipboard;
+
+static const char              puglBrowserTextType[] = "text/plain";
+static PuglBrowserTimer*        puglBrowserTimers        = NULL;
+static PuglBrowserPasteRequest* puglBrowserPasteRequests = NULL;
+static PuglBrowserDropRegistration* puglBrowserDropRegistrations = NULL;
+static PuglBrowserClipboard     puglBrowserClipboard     = {NULL, NULL, 0U};
+static unsigned char*           puglBrowserDragData      = NULL;
+static size_t                   puglBrowserDragLen       = 0U;
+static PuglView*                puglBrowserDragView      = NULL;
+static uintptr_t                puglNextPasteToken       = 1U;
+static uintptr_t                puglNextDropToken        = 1U;
+static PuglView*                puglBrowserOfferView     = NULL;
+static const PuglDataOfferEvent* puglBrowserOffer        = NULL;
+static bool                     puglBrowserOfferHandled  = false;
+
+#if defined(__GNUC__)
+#  define PUGL_BROWSER_EXPORT __attribute__((visibility("default")))
+#else
+#  define PUGL_BROWSER_EXPORT
+#endif
+
+static PuglCoord
+puglClampCoord(int value);
+
+EM_JS(int, puglBrowserWriteClipboardText, (const char* text), {
+  if (typeof navigator === 'undefined' || !navigator.clipboard ||
+      typeof navigator.clipboard.writeText !== 'function') {
+    return 0;
+  }
+
+  const value = UTF8ToString(text);
+  const body = typeof document !== 'undefined' ? document.body : null;
+  if (body) {
+    body.dataset.puglClipboardWrite = 'pending';
+  }
+
+  navigator.clipboard.writeText(value).then(
+    () => {
+      if (body) {
+        body.dataset.puglClipboardWrite = 'success';
+      }
+    },
+    () => {
+      if (body) {
+        body.dataset.puglClipboardWrite = 'denied';
+      }
+    });
+
+  return 1;
+});
+
+EM_JS(int, puglBrowserReadClipboardText, (uintptr_t token), {
+  if (typeof navigator === 'undefined' || !navigator.clipboard ||
+      typeof navigator.clipboard.readText !== 'function') {
+    return 0;
+  }
+
+  const begin = Module['_puglEmscriptenPasteBegin'];
+  const end = Module['_puglEmscriptenPasteEnd'];
+  if (typeof begin !== 'function' || typeof end !== 'function') {
+    return 0;
+  }
+
+  const body = typeof document !== 'undefined' ? document.body : null;
+  if (body) {
+    body.dataset.puglClipboardRead = 'pending';
+  }
+
+  navigator.clipboard.readText().then(
+    (text) => {
+      const bytes = new TextEncoder().encode(String(text));
+      const pointer = begin(token, bytes.length);
+      if (!pointer) {
+        end(token, 0);
+        if (body) {
+          body.dataset.puglClipboardRead = 'failed';
+        }
+        return;
+      }
+
+      HEAPU8.set(bytes, pointer);
+      const delivered = end(token, 1);
+      if (body) {
+        body.dataset.puglClipboardRead = delivered ? 'success' : 'failed';
+      }
+    },
+    () => {
+      end(token, 0);
+      if (body) {
+        body.dataset.puglClipboardRead = 'denied';
+      }
+    });
+
+  return 1;
+});
+
+EM_JS(int,
+      puglBrowserInstallDrop,
+      (const char* selector, uintptr_t token), {
+  const element = document.querySelector(UTF8ToString(selector));
+  if (!element || element.__puglDrop) {
+    return 0;
+  }
+
+  const offer = Module['_puglEmscriptenDragOffer'];
+  const begin = Module['_puglEmscriptenDropBegin'];
+  const end = Module['_puglEmscriptenDropEnd'];
+  if (typeof offer !== 'function' || typeof begin !== 'function' ||
+      typeof end !== 'function') {
+    return 0;
+  }
+
+  const hasText = (event) => {
+    const transfer = event.dataTransfer;
+    return !!transfer && Array.from(transfer.types || []).includes('text/plain');
+  };
+
+  const position = (event) => {
+    const rect = element.getBoundingClientRect();
+    return [Math.round(event.clientX - rect.left),
+            Math.round(event.clientY - rect.top)];
+  };
+
+  const handlers = {};
+  handlers.offer = (event) => {
+    if (!hasText(event)) {
+      return;
+    }
+
+    const [x, y] = position(event);
+    if (offer(token, x, y)) {
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+    }
+  };
+
+  handlers.drop = (event) => {
+    if (!hasText(event)) {
+      return;
+    }
+
+    const [x, y] = position(event);
+    const text = event.dataTransfer.getData('text/plain');
+    const bytes = new TextEncoder().encode(String(text));
+    const pointer = begin(token, bytes.length, x, y);
+    if (!pointer) {
+      end(token, 0, x, y);
+      return;
+    }
+
+    HEAPU8.set(bytes, pointer);
+    if (end(token, 1, x, y)) {
+      event.preventDefault();
+    }
+  };
+
+  element.addEventListener('dragenter', handlers.offer, false);
+  element.addEventListener('dragover', handlers.offer, false);
+  element.addEventListener('drop', handlers.drop, false);
+  element.__puglDrop = handlers;
+  return 1;
+});
+
+EM_JS(void, puglBrowserUninstallDrop, (const char* selector), {
+  const element = document.querySelector(UTF8ToString(selector));
+  const handlers = element ? element.__puglDrop : null;
+  if (!element || !handlers) {
+    return;
+  }
+
+  element.removeEventListener('dragenter', handlers.offer, false);
+  element.removeEventListener('dragover', handlers.offer, false);
+  element.removeEventListener('drop', handlers.drop, false);
+  delete element.__puglDrop;
+});
+
+static PuglBrowserTimer*
+puglFindBrowserTimer(PuglView* const view, const uintptr_t id)
+{
+  for (PuglBrowserTimer* timer = puglBrowserTimers; timer; timer = timer->next) {
+    if (timer->view == view && timer->id == id) {
+      return timer;
+    }
+  }
+
+  return NULL;
+}
+
+static PuglBrowserPasteRequest*
+puglFindBrowserPasteRequest(const uintptr_t token)
+{
+  for (PuglBrowserPasteRequest* request = puglBrowserPasteRequests; request;
+       request = request->next) {
+    if (request->token == token) {
+      return request;
+    }
+  }
+
+  return NULL;
+}
+
+static PuglBrowserPasteRequest*
+puglFindBrowserPasteRequestForView(const PuglView* const view)
+{
+  for (PuglBrowserPasteRequest* request = puglBrowserPasteRequests; request;
+       request = request->next) {
+    if (request->view == view) {
+      return request;
+    }
+  }
+
+  return NULL;
+}
+
+static PuglBrowserDropRegistration*
+puglFindBrowserDropRegistration(const PuglView* const view)
+{
+  for (PuglBrowserDropRegistration* registration = puglBrowserDropRegistrations;
+       registration;
+       registration = registration->next) {
+    if (registration->view == view) {
+      return registration;
+    }
+  }
+
+  return NULL;
+}
+
+static PuglBrowserDropRegistration*
+puglFindBrowserDropRegistrationByToken(const uintptr_t token)
+{
+  for (PuglBrowserDropRegistration* registration = puglBrowserDropRegistrations;
+       registration;
+       registration = registration->next) {
+    if (registration->token == token) {
+      return registration;
+    }
+  }
+
+  return NULL;
+}
+
+static void
+puglRemoveBrowserPasteRequest(PuglBrowserPasteRequest* const request)
+{
+  PuglBrowserPasteRequest** link = &puglBrowserPasteRequests;
+  while (*link && *link != request) {
+    link = &(*link)->next;
+  }
+
+  if (*link) {
+    *link = request->next;
+  }
+
+  request->next = NULL;
+}
+
+static void
+puglClearBrowserPasteRequests(PuglView* const view)
+{
+  PuglBrowserPasteRequest** link = &puglBrowserPasteRequests;
+  while (*link) {
+    PuglBrowserPasteRequest* const request = *link;
+    if (request->view == view) {
+      *link = request->next;
+      free(request->data);
+      request->data  = NULL;
+      request->view  = NULL;
+      request->token = 0U;
+      free(request);
+    } else {
+      link = &request->next;
+    }
+  }
+}
+
+static void
+puglBrowserTimerCallback(void* const data)
+{
+  PuglBrowserTimer* const timer = (PuglBrowserTimer*)data;
+  PuglView* const         view  = timer ? timer->view : NULL;
+  if (!view || !view->impl || !view->impl->id) {
+    return;
+  }
+
+  PuglEvent event  = {0};
+  event.timer.type = PUGL_TIMER;
+  event.timer.id   = timer->id;
+  (void)puglDispatchEvent(view, &event);
+}
+
+static void
+puglClearBrowserTimers(PuglView* const view)
+{
+  PuglBrowserTimer** link = &puglBrowserTimers;
+  while (*link) {
+    PuglBrowserTimer* const timer = *link;
+    if (timer->view == view) {
+      *link = timer->next;
+      emscripten_clear_interval(timer->intervalId);
+      free(timer);
+    } else {
+      link = &timer->next;
+    }
+  }
+}
+
+static PuglStatus
+puglInstallBrowserDrop(PuglView* const view)
+{
+  PuglBrowserDropRegistration* const registration =
+    puglFindBrowserDropRegistration(view);
+  if (!registration || registration->installed) {
+    return PUGL_SUCCESS;
+  }
+
+  if (!view || !view->impl || !view->impl->id ||
+      !puglBrowserInstallDrop(view->impl->canvasSelector, registration->token)) {
+    return PUGL_REGISTRATION_FAILED;
+  }
+
+  registration->installed = true;
+  return PUGL_SUCCESS;
+}
+
+static void
+puglUninstallBrowserDrop(PuglView* const view)
+{
+  PuglBrowserDropRegistration* const registration =
+    puglFindBrowserDropRegistration(view);
+  if (!registration) {
+    return;
+  }
+
+  if (registration->installed && view && view->impl && view->impl->id) {
+    puglBrowserUninstallDrop(view->impl->canvasSelector);
+  }
+
+  registration->installed = false;
+  registration->accepted  = false;
+  free(registration->data);
+  registration->data = NULL;
+  registration->len  = 0U;
+
+  if (puglBrowserDragView == view) {
+    free(puglBrowserDragData);
+    puglBrowserDragData = NULL;
+    puglBrowserDragLen  = 0U;
+    puglBrowserDragView = NULL;
+  }
+}
+
+static void
+puglFreeBrowserDropRegistration(PuglView* const view)
+{
+  puglUninstallBrowserDrop(view);
+
+  PuglBrowserDropRegistration** link = &puglBrowserDropRegistrations;
+  while (*link) {
+    PuglBrowserDropRegistration* const registration = *link;
+    if (registration->view == view) {
+      *link = registration->next;
+      registration->view = NULL;
+      free(registration);
+      return;
+    }
+    link = &registration->next;
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT uintptr_t
+puglEmscriptenPasteBegin(const uintptr_t token, const size_t len)
+{
+  PuglBrowserPasteRequest* const request = puglFindBrowserPasteRequest(token);
+  PuglView* const view = request ? request->view : NULL;
+  if (!request || !view || !view->impl || !view->impl->id) {
+    return 0U;
+  }
+
+  unsigned char* const data = (unsigned char*)malloc(len + 1U);
+  if (!data) {
+    return 0U;
+  }
+
+  free(request->data);
+  request->data = data;
+  request->len  = len;
+  return (uintptr_t)data;
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT int
+puglEmscriptenPasteEnd(const uintptr_t token, const int success)
+{
+  PuglBrowserPasteRequest* const request = puglFindBrowserPasteRequest(token);
+  if (!request) {
+    return 0;
+  }
+
+  PuglView* const      view = request->view;
+  unsigned char* const data = request->data;
+  const size_t         len  = request->len;
+  request->data              = NULL;
+  request->view              = NULL;
+  puglRemoveBrowserPasteRequest(request);
+  free(request);
+
+  if (!success || !data || !view || !view->impl || !view->impl->id) {
+    free(data);
+    return success ? 0 : 1;
+  }
+
+  data[len] = '\0';
+  char* const newType = (char*)malloc(sizeof(puglBrowserTextType));
+  if (!newType) {
+    free(data);
+    return 0;
+  }
+
+  memcpy(newType, puglBrowserTextType, sizeof(puglBrowserTextType));
+  free(puglBrowserClipboard.type);
+  free(puglBrowserClipboard.data);
+  puglBrowserClipboard.type = newType;
+  puglBrowserClipboard.data = data;
+  puglBrowserClipboard.len  = len;
+
+  PuglEvent event         = {0};
+  event.offer.type        = PUGL_DATA_OFFER;
+  event.offer.time        = puglGetTime(view->world);
+  event.offer.x           = view->impl->pointerX;
+  event.offer.y           = view->impl->pointerY;
+  event.offer.clipboard   = PUGL_CLIPBOARD_GENERAL;
+
+  puglBrowserOfferView    = view;
+  puglBrowserOffer        = &event.offer;
+  puglBrowserOfferHandled = false;
+  const PuglStatus st     = puglDispatchEvent(view, &event);
+  puglBrowserOfferView    = NULL;
+  puglBrowserOffer        = NULL;
+  puglBrowserOfferHandled = false;
+  return st == PUGL_SUCCESS;
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT int
+puglEmscriptenDragOffer(const uintptr_t token, const int x, const int y)
+{
+  PuglBrowserDropRegistration* const registration =
+    puglFindBrowserDropRegistrationByToken(token);
+  PuglView* const view = registration ? registration->view : NULL;
+  if (!registration || !view || !view->impl || !view->impl->id) {
+    return 0;
+  }
+
+  registration->accepted = false;
+
+  PuglEvent event         = {0};
+  event.offer.type        = PUGL_DATA_OFFER;
+  event.offer.time        = puglGetTime(view->world);
+  event.offer.x           = puglClampCoord(x);
+  event.offer.y           = puglClampCoord(y);
+  event.offer.clipboard   = PUGL_CLIPBOARD_DRAG;
+
+  puglBrowserOfferView    = view;
+  puglBrowserOffer        = &event.offer;
+  puglBrowserOfferHandled = false;
+  const PuglStatus st     = puglDispatchEvent(view, &event);
+  puglBrowserOfferView    = NULL;
+  puglBrowserOffer        = NULL;
+  puglBrowserOfferHandled = false;
+  return st == PUGL_SUCCESS && registration->accepted;
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT uintptr_t
+puglEmscriptenDropBegin(const uintptr_t token,
+                        const size_t    len,
+                        const int       x,
+                        const int       y)
+{
+  (void)x;
+  (void)y;
+
+  PuglBrowserDropRegistration* const registration =
+    puglFindBrowserDropRegistrationByToken(token);
+  PuglView* const view = registration ? registration->view : NULL;
+  if (!registration || !registration->accepted || !view || !view->impl ||
+      !view->impl->id) {
+    return 0U;
+  }
+
+  unsigned char* const data = (unsigned char*)malloc(len + 1U);
+  if (!data) {
+    return 0U;
+  }
+
+  free(registration->data);
+  registration->data = data;
+  registration->len  = len;
+  return (uintptr_t)data;
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT int
+puglEmscriptenDropEnd(const uintptr_t token,
+                      const int       success,
+                      const int       x,
+                      const int       y)
+{
+  PuglBrowserDropRegistration* const registration =
+    puglFindBrowserDropRegistrationByToken(token);
+  if (!registration) {
+    return 0;
+  }
+
+  PuglView* const      view = registration->view;
+  unsigned char* const data = registration->data;
+  const size_t         len  = registration->len;
+  registration->data        = NULL;
+  registration->len         = 0U;
+
+  if (!success || !registration->accepted || !data || !view || !view->impl ||
+      !view->impl->id) {
+    free(data);
+    registration->accepted = false;
+    return success ? 0 : 1;
+  }
+
+  data[len] = '\0';
+  free(puglBrowserDragData);
+  puglBrowserDragData = data;
+  puglBrowserDragLen  = len;
+  puglBrowserDragView = view;
+  registration->accepted = false;
+
+  PuglEvent event      = {0};
+  event.data.type      = PUGL_DATA;
+  event.data.time      = puglGetTime(view->world);
+  event.data.x         = puglClampCoord(x);
+  event.data.y         = puglClampCoord(y);
+  event.data.clipboard = PUGL_CLIPBOARD_DRAG;
+  event.data.typeIndex = 0U;
+  return puglDispatchEvent(view, &event) == PUGL_SUCCESS;
+}
+
 static PuglCoord
 puglClampCoord(const int value)
 {
@@ -222,6 +799,9 @@ puglFreeViewInternals(PuglView* const view)
       (void)puglUnrealize(view);
     }
 
+    puglClearBrowserTimers(view);
+    puglClearBrowserPasteRequests(view);
+    puglFreeBrowserDropRegistration(view);
     puglEmscriptenFreeInput(view);
     free(view->impl);
   }
@@ -289,8 +869,17 @@ puglRealize(PuglView* const view)
     return st;
   }
 
+  if ((st = puglInstallBrowserDrop(view))) {
+    puglEmscriptenUnregisterInput(view);
+    view->backend->destroy(view);
+    puglDestroyDomView(impl->id);
+    impl->id = 0U;
+    return st;
+  }
+
   st = puglDispatchSimpleEvent(view, PUGL_REALIZE);
   if (st) {
+    puglUninstallBrowserDrop(view);
     puglEmscriptenUnregisterInput(view);
     view->backend->destroy(view);
     puglDestroyDomView(impl->id);
@@ -310,6 +899,9 @@ puglUnrealize(PuglView* const view)
 
   const uintptr_t id = impl->id;
   const PuglStatus st = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
+  puglClearBrowserTimers(view);
+  puglClearBrowserPasteRequests(view);
+  puglUninstallBrowserDrop(view);
   puglEmscriptenUnregisterInput(view);
   view->backend->destroy(view);
   puglDestroyDomView(id);
@@ -400,18 +992,64 @@ puglHasFocus(const PuglView* const view)
 PuglStatus
 puglStartTimer(PuglView* const view, const uintptr_t id, const double timeout)
 {
-  (void)view;
-  (void)id;
-  (void)timeout;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || !view->impl->id || timeout <= 0.0) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglBrowserTimer* timer = puglFindBrowserTimer(view, id);
+  if (timer) {
+    const long intervalId =
+      emscripten_set_interval(puglBrowserTimerCallback, timeout * 1000.0, timer);
+    if (intervalId <= 0) {
+      return PUGL_UNKNOWN_ERROR;
+    }
+
+    emscripten_clear_interval(timer->intervalId);
+    timer->intervalId = intervalId;
+    return PUGL_SUCCESS;
+  }
+
+  timer = (PuglBrowserTimer*)calloc(1U, sizeof(PuglBrowserTimer));
+  if (!timer) {
+    return PUGL_NO_MEMORY;
+  }
+
+  timer->view = view;
+  timer->id   = id;
+
+  const long intervalId =
+    emscripten_set_interval(puglBrowserTimerCallback, timeout * 1000.0, timer);
+  if (intervalId <= 0) {
+    free(timer);
+    return PUGL_UNKNOWN_ERROR;
+  }
+
+  timer->intervalId = intervalId;
+  timer->next       = puglBrowserTimers;
+  puglBrowserTimers = timer;
+  return PUGL_SUCCESS;
 }
 
 PuglStatus
 puglStopTimer(PuglView* const view, const uintptr_t id)
 {
-  (void)view;
-  (void)id;
-  return PUGL_UNSUPPORTED;
+  if (!view) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglBrowserTimer** link = &puglBrowserTimers;
+  while (*link) {
+    PuglBrowserTimer* const timer = *link;
+    if (timer->view == view && timer->id == id) {
+      *link = timer->next;
+      emscripten_clear_interval(timer->intervalId);
+      free(timer);
+      return PUGL_SUCCESS;
+    }
+    link = &timer->next;
+  }
+
+  return PUGL_FAILURE;
 }
 
 PuglStatus
@@ -618,15 +1256,49 @@ puglAcceptOffer(PuglView* const                 view,
                 const unsigned                  regionWidth,
                 const unsigned                  regionHeight)
 {
-  (void)view;
-  (void)offer;
-  (void)typeIndex;
-  (void)action;
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-  return PUGL_UNSUPPORTED;
+  if (!view || !offer || !view->impl || !view->impl->id ||
+      !puglIsValidPosition(regionX, regionY) ||
+      !puglIsValidSize(regionWidth, regionHeight) ||
+      action > PUGL_DATA_ACTION_PRIVATE || typeIndex != 0U ||
+      (offer->clipboard != PUGL_CLIPBOARD_GENERAL &&
+       offer->clipboard != PUGL_CLIPBOARD_DRAG)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (view != puglBrowserOfferView || offer != puglBrowserOffer ||
+      puglBrowserOfferHandled) {
+    return PUGL_BAD_CALL;
+  }
+
+  if (offer->clipboard == PUGL_CLIPBOARD_DRAG) {
+    if (action != PUGL_DATA_ACTION_COPY) {
+      return PUGL_UNSUPPORTED;
+    }
+
+    PuglBrowserDropRegistration* const registration =
+      puglFindBrowserDropRegistration(view);
+    if (!registration) {
+      return PUGL_BAD_CALL;
+    }
+
+    puglBrowserOfferHandled = true;
+    registration->accepted = true;
+    return PUGL_SUCCESS;
+  }
+
+  if (!puglBrowserClipboard.type) {
+    return PUGL_BAD_CALL;
+  }
+
+  puglBrowserOfferHandled = true;
+  PuglEvent event         = {0};
+  event.data.type         = PUGL_DATA;
+  event.data.time         = offer->time;
+  event.data.x            = offer->x;
+  event.data.y            = offer->y;
+  event.data.clipboard    = offer->clipboard;
+  event.data.typeIndex    = typeIndex;
+  return puglDispatchEvent(view, &event);
 }
 
 PuglStatus
@@ -637,37 +1309,123 @@ puglRejectOffer(PuglView* const                 view,
                 const unsigned                  regionWidth,
                 const unsigned                  regionHeight)
 {
-  (void)view;
-  (void)offer;
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-  return PUGL_UNSUPPORTED;
+  if (!view || !offer || !view->impl || !view->impl->id ||
+      !puglIsValidPosition(regionX, regionY) ||
+      !puglIsValidSize(regionWidth, regionHeight) ||
+      (offer->clipboard != PUGL_CLIPBOARD_GENERAL &&
+       offer->clipboard != PUGL_CLIPBOARD_DRAG)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (view != puglBrowserOfferView || offer != puglBrowserOffer ||
+      puglBrowserOfferHandled) {
+    return PUGL_BAD_CALL;
+  }
+
+  puglBrowserOfferHandled = true;
+  if (offer->clipboard == PUGL_CLIPBOARD_DRAG) {
+    PuglBrowserDropRegistration* const registration =
+      puglFindBrowserDropRegistration(view);
+    if (registration) {
+      registration->accepted = false;
+    }
+  }
+  return PUGL_SUCCESS;
 }
 
 PuglStatus
 puglPaste(PuglView* const view)
 {
-  (void)view;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || !view->impl->id) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (puglFindBrowserPasteRequestForView(view)) {
+    return PUGL_FAILURE;
+  }
+
+  PuglBrowserPasteRequest* const request =
+    (PuglBrowserPasteRequest*)calloc(1U, sizeof(PuglBrowserPasteRequest));
+  if (!request) {
+    return PUGL_NO_MEMORY;
+  }
+
+  uintptr_t token = puglNextPasteToken++;
+  if (!token) {
+    token = puglNextPasteToken++;
+  }
+
+  request->view  = view;
+  request->token = token;
+  request->next  = puglBrowserPasteRequests;
+  puglBrowserPasteRequests = request;
+
+  if (!puglBrowserReadClipboardText(token)) {
+    puglRemoveBrowserPasteRequest(request);
+    free(request);
+    return PUGL_UNSUPPORTED;
+  }
+
+  return PUGL_SUCCESS;
 }
 
 PuglStatus
 puglRegisterDropType(PuglView* const view, const char* const type)
 {
-  (void)view;
-  (void)type;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  const char* const normalizedType = type ? type : puglBrowserTextType;
+  if (strcmp(normalizedType, puglBrowserTextType)) {
+    return PUGL_UNSUPPORTED;
+  }
+
+  if (puglFindBrowserDropRegistration(view)) {
+    return PUGL_SUCCESS;
+  }
+
+  PuglBrowserDropRegistration* const registration =
+    (PuglBrowserDropRegistration*)calloc(1U,
+                                         sizeof(PuglBrowserDropRegistration));
+  if (!registration) {
+    return PUGL_NO_MEMORY;
+  }
+
+  uintptr_t token = puglNextDropToken++;
+  if (!token) {
+    token = puglNextDropToken++;
+  }
+
+  registration->view  = view;
+  registration->token = token;
+  registration->next  = puglBrowserDropRegistrations;
+  puglBrowserDropRegistrations = registration;
+
+  if (view->impl->id) {
+    const PuglStatus st = puglInstallBrowserDrop(view);
+    if (st) {
+      puglFreeBrowserDropRegistration(view);
+      return st;
+    }
+  }
+
+  return PUGL_SUCCESS;
 }
 
 uint32_t
 puglGetNumClipboardTypes(const PuglView* const view,
                          const PuglClipboard   clipboard)
 {
-  (void)view;
-  (void)clipboard;
-  return 0U;
+  if (clipboard == PUGL_CLIPBOARD_GENERAL) {
+    return puglBrowserClipboard.type ? 1U : 0U;
+  }
+
+  return clipboard == PUGL_CLIPBOARD_DRAG && view == puglBrowserOfferView &&
+             puglBrowserOffer &&
+             puglBrowserOffer->clipboard == PUGL_CLIPBOARD_DRAG
+           ? 1U
+           : 0U;
 }
 
 const char*
@@ -675,10 +1433,19 @@ puglGetClipboardType(const PuglView* const view,
                      const PuglClipboard   clipboard,
                      const uint32_t        typeIndex)
 {
-  (void)view;
-  (void)clipboard;
-  (void)typeIndex;
-  return NULL;
+  if (typeIndex != 0U) {
+    return NULL;
+  }
+
+  if (clipboard == PUGL_CLIPBOARD_GENERAL) {
+    return puglBrowserClipboard.type;
+  }
+
+  return clipboard == PUGL_CLIPBOARD_DRAG && view == puglBrowserOfferView &&
+             puglBrowserOffer &&
+             puglBrowserOffer->clipboard == PUGL_CLIPBOARD_DRAG
+           ? puglBrowserTextType
+           : NULL;
 }
 
 PuglStatus
@@ -688,12 +1455,43 @@ puglSetClipboard(PuglView* const     view,
                  const void* const   data,
                  const size_t        len)
 {
-  (void)view;
-  (void)clipboard;
-  (void)type;
-  (void)data;
-  (void)len;
-  return PUGL_UNSUPPORTED;
+  if (!view || !view->impl || !view->impl->id || (!data && len)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  const char* const normalizedType = type ? type : puglBrowserTextType;
+  if (clipboard != PUGL_CLIPBOARD_GENERAL ||
+      strcmp(normalizedType, puglBrowserTextType)) {
+    return PUGL_UNSUPPORTED;
+  }
+
+  const size_t typeLen = strlen(normalizedType);
+  char* const newType = (char*)malloc(typeLen + 1U);
+  unsigned char* const newData = (unsigned char*)malloc(len + 1U);
+  if (!newType || !newData) {
+    free(newType);
+    free(newData);
+    return PUGL_NO_MEMORY;
+  }
+
+  memcpy(newType, normalizedType, typeLen + 1U);
+  if (len) {
+    memcpy(newData, data, len);
+  }
+  newData[len] = '\0';
+
+  if (!puglBrowserWriteClipboardText((const char*)newData)) {
+    free(newType);
+    free(newData);
+    return PUGL_UNSUPPORTED;
+  }
+
+  free(puglBrowserClipboard.type);
+  free(puglBrowserClipboard.data);
+  puglBrowserClipboard.type = newType;
+  puglBrowserClipboard.data = newData;
+  puglBrowserClipboard.len  = len;
+  return PUGL_SUCCESS;
 }
 
 const void*
@@ -702,13 +1500,34 @@ puglGetClipboard(PuglView* const     view,
                  const uint32_t      typeIndex,
                  size_t* const       len)
 {
-  (void)view;
-  (void)clipboard;
-  (void)typeIndex;
   if (len) {
     *len = 0U;
   }
-  return NULL;
+
+  if (typeIndex != 0U) {
+    return NULL;
+  }
+
+  if (clipboard == PUGL_CLIPBOARD_GENERAL) {
+    if (!puglBrowserClipboard.data) {
+      return NULL;
+    }
+
+    if (len) {
+      *len = puglBrowserClipboard.len;
+    }
+    return puglBrowserClipboard.data;
+  }
+
+  if (clipboard != PUGL_CLIPBOARD_DRAG || puglBrowserDragView != view ||
+      !puglBrowserDragData) {
+    return NULL;
+  }
+
+  if (len) {
+    *len = puglBrowserDragLen;
+  }
+  return puglBrowserDragData;
 }
 
 PuglStatus
