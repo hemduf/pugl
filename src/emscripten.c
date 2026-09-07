@@ -261,6 +261,102 @@ EM_JS(int, puglBrowserSetCursor, (const char* selector, int cursor), {
   return 1;
 });
 
+
+EM_JS(int,
+      puglBrowserInstallFullscreen,
+      (const char* selector, uintptr_t token), {
+  if (typeof document === 'undefined') {
+    return 0;
+  }
+
+  const element = document.querySelector(UTF8ToString(selector));
+  if (!element || element.__puglFullscreen) {
+    return 0;
+  }
+
+  const changed = Module['_puglEmscriptenFullscreenChanged'];
+  if (typeof changed !== 'function') {
+    return 0;
+  }
+
+  const handler = () => {
+    changed(token, document.fullscreenElement === element ? 1 : 0);
+  };
+
+  document.addEventListener('fullscreenchange', handler, false);
+  element.__puglFullscreen = handler;
+  return 1;
+});
+
+EM_JS(void, puglBrowserUninstallFullscreen, (const char* selector), {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const element = document.querySelector(UTF8ToString(selector));
+  const handler = element ? element.__puglFullscreen : null;
+  if (!element || !handler) {
+    return;
+  }
+
+  document.removeEventListener('fullscreenchange', handler, false);
+  delete element.__puglFullscreen;
+});
+
+EM_JS(int, puglBrowserSetFullscreen, (const char* selector, int fullscreen), {
+  if (typeof document === 'undefined') {
+    return 0;
+  }
+
+  const element = document.querySelector(UTF8ToString(selector));
+  if (!element) {
+    return 0;
+  }
+
+  if (fullscreen) {
+    if (document.fullscreenElement === element) {
+      return 1;
+    }
+
+    if (document.fullscreenElement) {
+      return 0;
+    }
+
+    if (document.fullscreenEnabled === false ||
+        typeof element.requestFullscreen !== 'function') {
+      return -1;
+    }
+
+    try {
+      const result = element.requestFullscreen();
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {});
+      }
+      return 1;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  if (document.fullscreenElement !== element) {
+    return 1;
+  }
+
+  if (typeof document.exitFullscreen !== 'function') {
+    return -1;
+  }
+
+  try {
+    const result = document.exitFullscreen();
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => {});
+    }
+    return 1;
+  } catch (_) {
+    return 0;
+  }
+});
+
 static PuglBrowserTimer*
 puglFindBrowserTimer(PuglView* const view, const uintptr_t id)
 {
@@ -810,6 +906,50 @@ puglDispatchConfigure(PuglView* const view, const PuglViewStyleFlags style)
   return puglDispatchEvent(view, &event);
 }
 
+
+static PuglStatus
+puglDispatchStyleConfigure(PuglView* const view,
+                           const PuglViewStyleFlags style)
+{
+  PuglEvent event = {0};
+  if (view->lastConfigure.type == PUGL_CONFIGURE) {
+    event.configure = view->lastConfigure;
+  } else {
+    const PuglArea  size  = puglGetInitialSize(view);
+    const PuglPoint point = puglGetInitialPosition(view, size);
+    event.configure.x      = point.x;
+    event.configure.y      = point.y;
+    event.configure.width  = size.width;
+    event.configure.height = size.height;
+  }
+
+  event.configure.type  = PUGL_CONFIGURE;
+  event.configure.flags = 0U;
+  event.configure.style = style;
+  return puglDispatchEvent(view, &event);
+}
+
+EMSCRIPTEN_KEEPALIVE PUGL_BROWSER_EXPORT void
+puglEmscriptenFullscreenChanged(const uintptr_t token, const int fullscreen)
+{
+  PuglView* const view = (PuglView*)token;
+  if (!view || !view->impl || !view->impl->id) {
+    return;
+  }
+
+  const PuglViewStyleFlags oldStyle =
+    view->lastConfigure.type == PUGL_CONFIGURE
+      ? view->lastConfigure.style
+      : (view->impl->mapped ? PUGL_VIEW_STYLE_MAPPED
+                            : PUGL_VIEW_STYLE_HIDDEN);
+  const PuglViewStyleFlags newStyle =
+    fullscreen ? oldStyle | PUGL_VIEW_STYLE_FULLSCREEN
+               : oldStyle & ~PUGL_VIEW_STYLE_FULLSCREEN;
+  if (newStyle != oldStyle) {
+    (void)puglDispatchStyleConfigure(view, newStyle);
+  }
+}
+
 static PuglArea
 puglCurrentArea(const PuglView* const view)
 {
@@ -994,7 +1134,16 @@ puglRealize(PuglView* const view)
     return st;
   }
 
+  if (!puglBrowserInstallFullscreen(impl->canvasSelector, (uintptr_t)view)) {
+    puglEmscriptenUnregisterInput(view);
+    view->backend->destroy(view);
+    puglDestroyDomView(impl->id);
+    impl->id = 0U;
+    return PUGL_REGISTRATION_FAILED;
+  }
+
   if ((st = puglInstallBrowserDrop(view))) {
+    puglBrowserUninstallFullscreen(impl->canvasSelector);
     puglEmscriptenUnregisterInput(view);
     view->backend->destroy(view);
     puglDestroyDomView(impl->id);
@@ -1005,6 +1154,7 @@ puglRealize(PuglView* const view)
   st = puglDispatchSimpleEvent(view, PUGL_REALIZE);
   if (st) {
     puglUninstallBrowserDrop(view);
+    puglBrowserUninstallFullscreen(impl->canvasSelector);
     puglEmscriptenUnregisterInput(view);
     view->backend->destroy(view);
     puglDestroyDomView(impl->id);
@@ -1027,6 +1177,7 @@ puglUnrealize(PuglView* const view)
   puglClearBrowserTimers(view);
   puglClearBrowserPasteRequests(view);
   puglUninstallBrowserDrop(view);
+  puglBrowserUninstallFullscreen(impl->canvasSelector);
   puglEmscriptenUnregisterInput(view);
   view->backend->destroy(view);
   puglDestroyDomView(id);
@@ -1092,16 +1243,52 @@ puglHide(PuglView* const view)
 PuglStatus
 puglSetViewStyle(PuglView* const view, const PuglViewStyleFlags flags)
 {
-  const PuglViewStyleFlags supported =
-    PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_HIDDEN;
+  const PuglViewStyleFlags supported = PUGL_VIEW_STYLE_MAPPED |
+                                       PUGL_VIEW_STYLE_HIDDEN |
+                                       PUGL_VIEW_STYLE_FULLSCREEN;
+
+  if (!view || !view->impl) {
+    return PUGL_BAD_PARAMETER;
+  }
 
   if (flags & ~supported) {
     return PUGL_UNSUPPORTED;
   }
 
-  return (flags & PUGL_VIEW_STYLE_HIDDEN) ? puglHide(view)
-         : (flags & PUGL_VIEW_STYLE_MAPPED) ? puglShow(view, PUGL_SHOW_PASSIVE)
-                                            : PUGL_SUCCESS;
+  if ((flags & PUGL_VIEW_STYLE_HIDDEN) &&
+      (flags & PUGL_VIEW_STYLE_FULLSCREEN)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglStatus st = PUGL_SUCCESS;
+  if (flags & PUGL_VIEW_STYLE_HIDDEN) {
+    st = puglHide(view);
+  } else if (flags &
+             (PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_FULLSCREEN)) {
+    st = puglShow(view, PUGL_SHOW_PASSIVE);
+  }
+
+  if (st) {
+    return st;
+  }
+
+  const bool wantFullscreen =
+    (flags & PUGL_VIEW_STYLE_FULLSCREEN) != 0U;
+  const bool haveFullscreen =
+    (puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN) != 0U;
+  if (wantFullscreen == haveFullscreen) {
+    return PUGL_SUCCESS;
+  }
+
+  if (!view->impl->id) {
+    return PUGL_FAILURE;
+  }
+
+  const int result = puglBrowserSetFullscreen(
+    view->impl->canvasSelector, wantFullscreen ? 1 : 0);
+  return result > 0 ? PUGL_SUCCESS
+         : result < 0 ? PUGL_UNSUPPORTED
+                      : PUGL_FAILURE;
 }
 
 PuglStatus
