@@ -1,0 +1,96 @@
+name: Apply browser raise semantics patch
+
+on:
+  push:
+    branches:
+      - feature/emscripten-browser-semantics
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor == 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/emscripten-browser-semantics
+          fetch-depth: 0
+
+      - name: Apply GREEN implementation and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/emscripten.c')
+          text = path.read_text()
+          old = '''PuglStatus
+          puglShow(PuglView* const view, const PuglShowCommand command)
+          {
+            (void)command;
+
+            PuglInternals* const impl = view ? view->impl : NULL;
+            if (!impl) {
+              return PUGL_BAD_PARAMETER;
+            }
+
+            PuglStatus st = impl->id ? PUGL_SUCCESS : puglRealize(view);
+            if (st) {
+              return st;
+            }
+
+            if (!impl->mapped) {
+              impl->mapped = true;
+              puglSetDomVisible(impl->id, true);
+              st = puglDispatchConfigure(view, PUGL_VIEW_STYLE_MAPPED);
+              if (!st) {
+                st = puglObscureView(view);
+              }
+            }
+
+            return st;
+          }
+          '''.replace('          ', '')
+          new = '''PuglStatus
+          puglShow(PuglView* const view, const PuglShowCommand command)
+          {
+            PuglInternals* const impl = view ? view->impl : NULL;
+            if (!impl) {
+              return PUGL_BAD_PARAMETER;
+            }
+
+            PuglStatus st = impl->id ? PUGL_SUCCESS : puglRealize(view);
+            if (st) {
+              return st;
+            }
+
+            if (!impl->mapped) {
+              impl->mapped = true;
+              puglSetDomVisible(impl->id, true);
+              st = puglDispatchConfigure(view, PUGL_VIEW_STYLE_MAPPED);
+              if (!st) {
+                st = puglObscureView(view);
+              }
+            }
+
+            if (st) {
+              return st;
+            }
+
+            return command == PUGL_SHOW_PASSIVE ? PUGL_SUCCESS : PUGL_FAILURE;
+          }
+          '''.replace('          ', '')
+          if old not in text:
+              raise SystemExit('Expected RED puglShow implementation not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          rm .github/workflows/automation-patch-browser-raise.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/emscripten.c .github/workflows/automation-patch-browser-raise.yml
+          git commit -m 'Implement explicit browser raise semantics'
+          git push origin HEAD:feature/emscripten-browser-semantics
