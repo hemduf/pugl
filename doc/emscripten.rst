@@ -102,7 +102,8 @@ Then set that value as the Pugl parent before realization:
 
 The host element remains owned by the application; unrealizing or freeing the
 Pugl view removes only the Pugl canvas.
-If a non-zero parent handle cannot be resolved, realization fails explicitly.
+If a non-zero parent handle cannot be resolved, realization returns
+:enumerator:`PUGL_REALIZE_FAILED`.
 
 Canvas CSS dimensions are logical Pugl dimensions.
 The backing buffer is scaled by ``window.devicePixelRatio`` and
@@ -140,8 +141,9 @@ The effective context API is reported as ``PUGL_OPENGL_ES_API`` after creation.
 
 Alpha, depth, stencil, and multisampling hints are mapped to
 ``EmscriptenWebGLContextAttributes``.
-Debug contexts are unsupported and the only supported swap interval is 1 (or
-``PUGL_DONT_CARE`` before realization).
+Debug contexts return :enumerator:`PUGL_UNSUPPORTED`.
+The supported swap interval is 1, with ``PUGL_DONT_CARE`` accepted before
+realization; other explicit values return :enumerator:`PUGL_UNSUPPORTED`.
 Contexts are made current for expose and explicit enter/leave operations.
 :func:`puglGetContext` exposes the Emscripten WebGL context handle and
 :func:`puglGetProcAddress` uses Emscripten's WebGL procedure lookup.
@@ -208,7 +210,7 @@ Normal argument/lifecycle errors can still return the usual Pugl error statuses.
      - Supported; not a DOM pointer
    * - Parent embedding
      - ``data-pugl-native-view`` host lookup
-     - Supported before realization
+     - Supported before realization; unresolved handles cause ``PUGL_REALIZE_FAILED``
    * - Window position
      - No browser top-level window-position equivalent
      - ``PUGL_UNSUPPORTED``
@@ -223,10 +225,10 @@ Normal argument/lifecycle errors can still return the usual Pugl error statuses.
      - Supported with fallback
    * - Show/hide
      - Canvas visibility
-     - Passive show supported; raise/force-raise are not representable
+     - Passive show succeeds; raise/force-raise show the view but return ``PUGL_FAILURE``
    * - View styles
      - MAPPED, HIDDEN, FULLSCREEN
-     - Other desktop stacking/window styles are unsupported
+     - Other desktop stacking/window style bits return ``PUGL_UNSUPPORTED``
    * - Resizable hint
      - CSS resize plus resize observation
      - Supported
@@ -241,7 +243,7 @@ Normal argument/lifecycle errors can still return the usual Pugl error statuses.
      - ``PUGL_UNSUPPORTED``
    * - Transient parent
      - Zero/no transient relationship only
-     - Non-zero transient parent is unsupported
+     - Non-zero transient parent returns ``PUGL_UNSUPPORTED``
    * - Cursor
      - CSS cursor values for all ``PuglCursor`` values
      - Supported
