@@ -22,6 +22,7 @@ The core API (excluding backend-specific components) is declared in ``pugl.h``:
    events
    event-loop
    clipboards
+   emscripten
    shutting-down
 
 .. _pkg-config: https://www.freedesktop.org/wiki/Software/pkg-config/
