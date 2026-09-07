@@ -27,6 +27,7 @@ EM_JS(int, puglTestInstallFullscreenMock, (uintptr_t nativeView), {
   try {
     Object.defineProperty(document, 'fullscreenEnabled', {
       configurable: true,
+      writable: true,
       value: true,
     });
     Object.defineProperty(document, 'fullscreenElement', {
@@ -56,6 +57,17 @@ EM_JS(int, puglTestInstallFullscreenMock, (uintptr_t nativeView), {
 EM_JS(int, puglTestIsFullscreen, (uintptr_t nativeView), {
   const element = document.getElementById(`pugl-view-${nativeView}`);
   return !!element && document.fullscreenElement === element;
+});
+
+EM_JS(int, puglTestDisableFullscreen, (uintptr_t nativeView), {
+  const element = document.getElementById(`pugl-view-${nativeView}`);
+  if (!element || typeof document === 'undefined') {
+    return 0;
+  }
+
+  document.fullscreenEnabled = false;
+  element.requestFullscreen = undefined;
+  return 1;
 });
 
 static PuglStatus
@@ -138,9 +150,24 @@ puglRunBrowserFullscreenSemantics(void* const data)
     puglBrowserFullscreenState.configureEvents > beforeLeave &&
     !(puglBrowserFullscreenState.style & PUGL_VIEW_STYLE_FULLSCREEN);
 
-  const PuglStatus unsupportedStatus =
+  const PuglStatus unsupportedStyleStatus =
     puglSetViewStyle(view, PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_ABOVE);
-  const bool explicitUnsupported = unsupportedStatus == PUGL_UNSUPPORTED;
+  const bool explicitUnsupportedStyle =
+    unsupportedStyleStatus == PUGL_UNSUPPORTED;
+
+  const PuglStatus invalidCombinationStatus = puglSetViewStyle(
+    view, PUGL_VIEW_STYLE_HIDDEN | PUGL_VIEW_STYLE_FULLSCREEN);
+  const bool invalidCombination = invalidCombinationStatus == PUGL_BAD_PARAMETER;
+
+  const bool fullscreenDisabled = puglTestDisableFullscreen(nativeView);
+  const PuglStatus unsupportedFullscreenStatus =
+    fullscreenDisabled
+      ? puglSetViewStyle(
+          view, PUGL_VIEW_STYLE_MAPPED | PUGL_VIEW_STYLE_FULLSCREEN)
+      : PUGL_FAILURE;
+  const bool explicitUnsupportedFullscreen =
+    unsupportedFullscreenStatus == PUGL_UNSUPPORTED &&
+    !(puglGetViewStyle(view) & PUGL_VIEW_STYLE_FULLSCREEN);
 
   if (shown) {
     (void)puglUnrealize(view);
@@ -149,11 +176,13 @@ puglRunBrowserFullscreenSemantics(void* const data)
   puglFreeWorld(world);
 
   if (!mockInstalled || !entered || !hidden || !reentered || !left ||
-      !explicitUnsupported) {
+      !explicitUnsupportedStyle || !invalidCombination ||
+      !explicitUnsupportedFullscreen) {
     fprintf(stderr,
             "Browser fullscreen style contract failed: mock=%d enter=%d "
             "entered=%d hide=%d hidden=%d reenter=%d reentered=%d "
-            "leave=%d left=%d unsupported=%d\n",
+            "leave=%d left=%d styleUnsupported=%d invalid=%d "
+            "fullscreenDisabled=%d fullscreenUnsupported=%d\n",
             mockInstalled,
             (int)enterStatus,
             entered,
@@ -163,7 +192,10 @@ puglRunBrowserFullscreenSemantics(void* const data)
             reentered,
             (int)leaveStatus,
             left,
-            (int)unsupportedStatus);
+            (int)unsupportedStyleStatus,
+            (int)invalidCombinationStatus,
+            fullscreenDisabled,
+            (int)unsupportedFullscreenStatus);
     emscripten_run_script(
       "throw new Error('Browser fullscreen style contract failed')");
   }
