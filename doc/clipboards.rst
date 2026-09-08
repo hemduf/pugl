@@ -91,6 +91,15 @@ A view region must also be given,
 which may be used to optimize the exchange or provide user feedback.
 It is safe, though possibly sub-optimal, to simply specify the entire frame as is done above.
 
+The current Windows backend uses ``WM_DROPFILES``, which has no native hover-time
+negotiation phase.  On Windows, :enumerator:`PUGL_DATA_OFFER` is therefore emitted
+after the operating system has delivered the drop, but before Pugl exposes the
+payload with :enumerator:`PUGL_DATA`.  Applications must still accept or reject
+the offer normally; rejecting it suppresses Pugl data delivery.  The offered
+position and resulting data position are the actual native drop location, but
+the action and accepted region can not affect native pre-drop feedback on this
+backend.
+
 When the item is dropped,
 Pugl will transfer the data in the appropriate datatype behind the scenes,
 and send a :enumerator:`PUGL_DATA` event to signal that the data is ready to be fetched with :func:`puglGetClipboard`:

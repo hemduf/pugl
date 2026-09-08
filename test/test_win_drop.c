@@ -13,6 +13,7 @@
 #include <shlwapi.h>
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +27,9 @@ typedef struct {
 } TestDropFiles;
 
 typedef struct {
+  unsigned offers;
   unsigned dataEvents;
+  bool     accept;
   double   x;
   double   y;
   char*    payload;
@@ -37,6 +40,37 @@ static PuglStatus
 onEvent(PuglView* const view, const PuglEvent* const event)
 {
   TestState* const state = (TestState*)puglGetHandle(view);
+
+  if (event->type == PUGL_DATA_OFFER &&
+      event->offer.clipboard == PUGL_CLIPBOARD_DRAG) {
+    ++state->offers;
+
+    assert(event->offer.x == 17.0);
+    assert(event->offer.y == 29.0);
+    assert(puglGetNumClipboardTypes(view, event->offer.clipboard) == 1U);
+    const char* const type = puglGetClipboardType(view, event->offer.clipboard, 0U);
+    assert(type);
+    assert(!strcmp(type, "text/uri-list"));
+
+    const unsigned dataEventsBeforeDecision = state->dataEvents;
+    const PuglStatus status =
+      state->accept
+        ? puglAcceptOffer(view,
+                          &event->offer,
+                          0U,
+                          PUGL_DATA_ACTION_COPY,
+                          101,
+                          203,
+                          7U,
+                          11U)
+        : puglRejectOffer(view, &event->offer, 101, 203, 7U, 11U);
+
+    // Accepting an offer only records the decision.  PUGL_DATA must be
+    // dispatched after this callback returns, not re-entrantly from accept.
+    assert(state->dataEvents == dataEventsBeforeDecision);
+    return status;
+  }
+
   if (event->type != PUGL_DATA || event->data.clipboard != PUGL_CLIPBOARD_DRAG) {
     return PUGL_SUCCESS;
   }
@@ -118,7 +152,7 @@ main(void)
   assert(world);
   assert(view);
 
-  TestState state = {0U, 0.0, 0.0, NULL, 0U};
+  TestState state = {0U, 0U, true, 0.0, 0.0, NULL, 0U};
   puglSetWorldString(world, PUGL_CLASS_NAME, "PuglWinDropTest");
   puglSetViewString(view, PUGL_WINDOW_TITLE, "Pugl Win Drop Test");
   puglSetBackend(view, puglStubBackend());
@@ -146,14 +180,24 @@ main(void)
 
   HWND const hwnd = (HWND)puglGetNativeView(view);
   assert(hwnd);
+
   SendMessage(hwnd, WM_DROPFILES, (WPARAM)makeDrop(first, second), 0);
 
+  assert(state.offers == 1U);
   assert(state.dataEvents == 1U);
   assert(state.x == 17.0);
   assert(state.y == 29.0);
   assert(state.payload);
   assert(state.payloadLen == expectedLen);
   assert(strlen(state.payload) == expectedLen);
+  assert(!memcmp(state.payload, expected, expectedLen));
+
+  state.accept = false;
+  SendMessage(hwnd, WM_DROPFILES, (WPARAM)makeDrop(first, second), 0);
+
+  assert(state.offers == 2U);
+  assert(state.dataEvents == 1U);
+  assert(state.payloadLen == expectedLen);
   assert(!memcmp(state.payload, expected, expectedLen));
 
   free(expected);

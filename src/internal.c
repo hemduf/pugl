@@ -94,7 +94,8 @@ puglSetBlob(PuglBlob* const dest, const void* const data, const size_t len)
     void* const newData = realloc(dest->data, len + 1);
     if (!newData) {
       free(dest->data);
-      dest->len = 0;
+      dest->data = NULL;
+      dest->len  = 0;
       return PUGL_NO_MEMORY;
     }
 
@@ -104,6 +105,7 @@ puglSetBlob(PuglBlob* const dest, const void* const data, const size_t len)
     dest->len  = len;
     dest->data = newData;
   } else {
+    free(dest->data);
     dest->len  = 0;
     dest->data = NULL;
   }
