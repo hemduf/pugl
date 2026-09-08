@@ -1,4 +1,3 @@
-// Copyright 2026 David Robillard <d@drobilla.net>
 // SPDX-License-Identifier: ISC
 
 // Tests the native MacOS drag-and-drop destination lifecycle
