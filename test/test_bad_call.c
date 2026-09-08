@@ -153,7 +153,7 @@ main(int argc, char** argv)
 
   // Tear down
   puglFreeView(test.view);
-  puglFreeWorld(world);
+  puglFreeWorld(test.world);
 
   return 0;
 }
