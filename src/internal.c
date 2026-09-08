@@ -105,6 +105,7 @@ puglSetBlob(PuglBlob* const dest, const void* const data, const size_t len)
     dest->len  = len;
     dest->data = newData;
   } else {
+    free(dest->data);
     dest->len  = 0;
     dest->data = NULL;
   }
