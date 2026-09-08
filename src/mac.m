@@ -364,17 +364,31 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
 
 /* NSDraggingDestination */
 
+- (NSPoint)dragLocation:(id<NSDraggingInfo>)sender
+{
+  const NSPoint location =
+    [self convertPoint:[sender draggingLocation] fromView:nil];
+  return nsPointFromPoints(puglview, location);
+}
+
+- (void)resetDragState
+{
+  dragSource            = nil;
+  dragOperation         = NSDragOperationNone;
+  acceptedDragTypeIndex = UINT32_MAX;
+  droppedUriList        = nil;
+}
+
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender
 {
-  dragSource     = sender;
-  dragOperation  = NSDragOperationNone;
-  droppedUriList = nil;
+  [self resetDragState];
+  dragSource = sender;
 
-  const NSPoint            wloc  = [sender draggingLocation];
+  const NSPoint            wloc  = [self dragLocation:sender];
   const PuglDataOfferEvent offer = {
     PUGL_DATA_OFFER,
     0,
-    mach_absolute_time() / 1e9,
+    puglGetTime(puglview->world),
     wloc.x,
     wloc.y,
     PUGL_CLIPBOARD_DRAG,
@@ -388,13 +402,22 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
 
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender
 {
-  assert(dragSource == sender);
+  if (dragSource != sender) {
+    [self resetDragState];
+    dragSource = sender;
+  }
 
-  const NSPoint            wloc  = [sender draggingLocation];
+  // Every update is a new offer decision.  Do not carry an acceptance from a
+  // previous location into a region the application did not accept.
+  dragOperation         = NSDragOperationNone;
+  acceptedDragTypeIndex = UINT32_MAX;
+  droppedUriList        = nil;
+
+  const NSPoint            wloc  = [self dragLocation:sender];
   const PuglDataOfferEvent offer = {
     PUGL_DATA_OFFER,
     0,
-    mach_absolute_time() / 1e9,
+    puglGetTime(puglview->world),
     wloc.x,
     wloc.y,
     PUGL_CLIPBOARD_DRAG,
@@ -406,41 +429,68 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
   return self->dragOperation;
 }
 
-- (void)draggingEnded:(id<NSDraggingInfo>)sender
+- (void)draggingExited:(id<NSDraggingInfo>)sender
 {
-  NSPasteboard* const pasteboard = [sender draggingPasteboard];
-  const NSPoint       wloc       = [sender draggingLocation];
+  if (dragSource == sender) {
+    [self resetDragState];
+  }
+}
 
-  const NSArray<NSPasteboardType>* const types = [pasteboard types];
-  if (acceptedDragTypeIndex >= [types count]) {
-    return;
+- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)sender
+{
+  if (dragSource != sender || dragOperation == NSDragOperationNone) {
+    return NO;
   }
 
+  const NSArray<NSPasteboardType>* const types =
+    [[sender draggingPasteboard] types];
+  return acceptedDragTypeIndex < [types count];
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender
+{
+  if (![self prepareForDragOperation:sender]) {
+    return NO;
+  }
+
+  NSPasteboard* const pasteboard = [sender draggingPasteboard];
+  const NSArray<NSPasteboardType>* const types = [pasteboard types];
   NSString* const uti = [types objectAtIndex:acceptedDragTypeIndex];
+
+  droppedUriList = nil;
   if ([uti isEqualToString:@"public.file-url"] ||
       [uti isEqualToString:@"com.apple.pasteboard.promised-file-url"]) {
-    // Convert file URI items into a single text/uri-list
-    droppedUriList = [NSString string];
+    NSMutableString* const uriList = [NSMutableString string];
+
+    // Convert file URI items into a single text/uri-list before dispatching
+    // PUGL_DATA so puglGetClipboard() can synchronously retrieve the payload.
     for (const NSPasteboardItem* item in [pasteboard pasteboardItems]) {
       NSString* const value = [item stringForType:uti];
       if (!value) {
         continue;
       }
 
-      NSURL* const      idUri   = [NSURL URLWithString:value];
-      const char* const pathRep = [idUri fileSystemRepresentation];
-      NSString* const   path    = [NSString stringWithUTF8String:pathRep];
-      NSString* const   pathUri = [[NSURL fileURLWithPath:path] absoluteString];
+      NSURL* const sourceUri = [NSURL URLWithString:value];
+      if (!sourceUri || ![sourceUri isFileURL] || ![sourceUri path]) {
+        continue;
+      }
 
-      droppedUriList = [droppedUriList stringByAppendingString:pathUri];
-      droppedUriList = [droppedUriList stringByAppendingFormat:@"\n"];
+      NSString* const pathUri =
+        [[NSURL fileURLWithPath:[sourceUri path]] absoluteString];
+      if (pathUri) {
+        [uriList appendString:pathUri];
+        [uriList appendString:@"\n"];
+      }
     }
+
+    droppedUriList = uriList;
   }
 
+  const NSPoint wloc = [self dragLocation:sender];
   const PuglDataEvent data = {
     PUGL_DATA,
     0,
-    mach_absolute_time() / 1e9,
+    puglGetTime(puglview->world),
     wloc.x,
     wloc.y,
     PUGL_CLIPBOARD_DRAG,
@@ -449,17 +499,21 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
 
   PuglEvent dataEvent;
   dataEvent.data = data;
-  puglDispatchEvent(puglview, &dataEvent);
-
-  dragSource = nil;
+  return puglDispatchEvent(puglview, &dataEvent) == PUGL_SUCCESS;
 }
 
 - (void)concludeDragOperation:(id<NSDraggingInfo>)sender
 {
-  assert(dragSource == sender);
-  dragSource            = nil;
-  dragOperation         = NSDragOperationPrivate;
-  acceptedDragTypeIndex = UINT32_MAX;
+  if (!dragSource || dragSource == sender) {
+    [self resetDragState];
+  }
+}
+
+- (void)draggingEnded:(id<NSDraggingInfo>)sender
+{
+  if (!dragSource || dragSource == sender) {
+    [self resetDragState];
+  }
 }
 
 static uint32_t
@@ -1434,6 +1488,7 @@ puglRealize(PuglView* view)
 
   [impl->wrapperView updateTrackingAreas];
 
+  impl->wrapperView->dragOperation         = NSDragOperationNone;
   impl->wrapperView->acceptedDragTypeIndex = UINT32_MAX;
   if (impl->registeredDropTypes) {
     [impl->wrapperView registerForDraggedTypes:view->impl->registeredDropTypes];
@@ -1966,14 +2021,13 @@ puglRegisterDropType(PuglView* const view, const char* const type)
 static NSPasteboard*
 getPasteboard(const PuglView* const view, const PuglClipboard clipboard)
 {
-  (void)view;
-
   if (clipboard == PUGL_CLIPBOARD_GENERAL) {
     return [NSPasteboard generalPasteboard];
   }
 
-  if (clipboard == PUGL_CLIPBOARD_DRAG && view->impl->wrapperView->dragSource) {
-    return [view->impl->wrapperView->dragSource draggingPasteboard];
+  PuglWrapperView* const wrapper = view->impl->wrapperView;
+  if (clipboard == PUGL_CLIPBOARD_DRAG && wrapper && wrapper->dragSource) {
+    return [wrapper->dragSource draggingPasteboard];
   }
 
   return NULL;
@@ -2058,6 +2112,10 @@ puglAcceptOffer(PuglView* const                 view,
   (void)regionWidth;
   (void)regionHeight;
 
+  if (!offer) {
+    return PUGL_BAD_PARAMETER;
+  }
+
   PuglWrapperView* const wrapper    = view->impl->wrapperView;
   NSPasteboard* const    pasteboard = getPasteboard(view, offer->clipboard);
   if (!pasteboard) {
@@ -2069,8 +2127,17 @@ puglAcceptOffer(PuglView* const                 view,
     return PUGL_BAD_PARAMETER;
   }
 
-  wrapper->dragOperation         = getDragOperation(action);
-  wrapper->acceptedDragTypeIndex = typeIndex;
+  if (offer->clipboard == PUGL_CLIPBOARD_DRAG) {
+    if (!wrapper || !wrapper->dragSource) {
+      return PUGL_BAD_PARAMETER;
+    }
+
+    // Accepting a drag offer only records the requested type/action.  The data
+    // is delivered by performDragOperation: after the user actually drops it.
+    wrapper->dragOperation         = getDragOperation(action);
+    wrapper->acceptedDragTypeIndex = typeIndex;
+    return PUGL_SUCCESS;
+  }
 
   const double        now  = puglGetTime(view->world);
   const PuglDataEvent data = {PUGL_DATA,
@@ -2085,6 +2152,39 @@ puglAcceptOffer(PuglView* const                 view,
   dataEvent.data = data;
   puglDispatchEvent(view, &dataEvent);
   return PUGL_SUCCESS;
+}
+
+PuglStatus
+puglRejectOffer(PuglView* const                 view,
+                const PuglDataOfferEvent* const offer,
+                const int                       regionX,
+                const int                       regionY,
+                const unsigned                  regionWidth,
+                const unsigned                  regionHeight)
+{
+  (void)regionX;
+  (void)regionY;
+  (void)regionWidth;
+  (void)regionHeight;
+
+  if (!offer) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (offer->clipboard == PUGL_CLIPBOARD_DRAG) {
+    PuglWrapperView* const wrapper = view->impl->wrapperView;
+    if (!wrapper || !wrapper->dragSource) {
+      return PUGL_BAD_PARAMETER;
+    }
+
+    wrapper->dragOperation         = NSDragOperationNone;
+    wrapper->acceptedDragTypeIndex = UINT32_MAX;
+    wrapper->droppedUriList        = nil;
+    return PUGL_SUCCESS;
+  }
+
+  return getPasteboard(view, offer->clipboard) ? PUGL_SUCCESS
+                                               : PUGL_BAD_PARAMETER;
 }
 
 const void*
@@ -2108,8 +2208,14 @@ puglGetClipboard(PuglView* const     view,
   NSString* const uti = [types objectAtIndex:typeIndex];
   if ([uti isEqualToString:@"public.file-url"] ||
       [uti isEqualToString:@"com.apple.pasteboard.promised-file-url"]) {
-    *len = [view->impl->wrapperView->droppedUriList length];
-    return [view->impl->wrapperView->droppedUriList UTF8String];
+    NSString* const uriList = view->impl->wrapperView->droppedUriList;
+    const char* const bytes = [uriList UTF8String];
+    if (bytes) {
+      *len = strlen(bytes);
+      return bytes;
+    }
+
+    return NULL;
   }
 
   const NSData* const data = [pasteboard dataForType:uti];

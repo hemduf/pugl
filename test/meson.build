@@ -82,6 +82,21 @@ foreach test : basic_exclusive_tests
   )
 endforeach
 
+# MacOS native drag-and-drop destination regression
+if platform == 'mac'
+  test(
+    'mac_drag_drop',
+    executable(
+      'test_mac_drag_drop',
+      'test_mac_drag_drop.m',
+      objc_args: objc_suppressions,
+      dependencies: [m_dep, pugl_dep, pugl_stub_dep],
+      implicit_include_directories: false,
+    ),
+    suite: 'unit',
+  )
+endif
+
 # Tests that need an OpenGL backend
 if opengl_dep.found()
   foreach test : gl_tests
