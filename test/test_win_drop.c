@@ -13,6 +13,7 @@
 #include <shlwapi.h>
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,21 +45,30 @@ onEvent(PuglView* const view, const PuglEvent* const event)
       event->offer.clipboard == PUGL_CLIPBOARD_DRAG) {
     ++state->offers;
 
+    assert(event->offer.x == 17.0);
+    assert(event->offer.y == 29.0);
     assert(puglGetNumClipboardTypes(view, event->offer.clipboard) == 1U);
     const char* const type = puglGetClipboardType(view, event->offer.clipboard, 0U);
     assert(type);
     assert(!strcmp(type, "text/uri-list"));
 
-    return state->accept
-             ? puglAcceptOffer(view,
-                               &event->offer,
-                               0U,
-                               PUGL_DATA_ACTION_COPY,
-                               101,
-                               203,
-                               7U,
-                               11U)
-             : puglRejectOffer(view, &event->offer, 101, 203, 7U, 11U);
+    const unsigned dataEventsBeforeDecision = state->dataEvents;
+    const PuglStatus status =
+      state->accept
+        ? puglAcceptOffer(view,
+                          &event->offer,
+                          0U,
+                          PUGL_DATA_ACTION_COPY,
+                          101,
+                          203,
+                          7U,
+                          11U)
+        : puglRejectOffer(view, &event->offer, 101, 203, 7U, 11U);
+
+    // Accepting an offer only records the decision.  PUGL_DATA must be
+    // dispatched after this callback returns, not re-entrantly from accept.
+    assert(state->dataEvents == dataEventsBeforeDecision);
+    return status;
   }
 
   if (event->type != PUGL_DATA || event->data.clipboard != PUGL_CLIPBOARD_DRAG) {
