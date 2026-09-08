@@ -8,9 +8,9 @@
 #include <pugl/pugl.h>
 #include <pugl/stub.h>
 
+#include <windows.h>
 #include <shellapi.h>
 #include <shlwapi.h>
-#include <windows.h>
 
 #include <assert.h>
 #include <stddef.h>
