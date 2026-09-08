@@ -407,6 +407,8 @@ puglFreeViewInternals(PuglView* view)
       view->backend->destroy(view);
     }
 
+    free(view->impl->clipboard.data);
+    free(view->impl->droppedUris);
     ReleaseDC(view->impl->hwnd, view->impl->hdc);
     DestroyWindow(view->impl->hwnd);
     free(view->impl);
@@ -848,6 +850,10 @@ handleMessage(PuglView* view, UINT message, WPARAM wParam, LPARAM lParam)
       }
       DragFinish(drop);
 
+      if (!impl->droppedUrisLen) {
+        break;
+      }
+
       const PuglEventFlags flags = event.any.flags;
       const double         time  = GetMessageTime() / 1e3;
       const PuglDataOfferEvent offer = {
@@ -865,9 +871,11 @@ handleMessage(PuglView* view, UINT message, WPARAM wParam, LPARAM lParam)
       impl->dropOfferActive = true;
       impl->dropAccepted    = false;
       const PuglStatus offerStatus = puglDispatchEvent(view, &offerEvent);
-      impl->dropOfferActive          = false;
+      const bool accepted = !offerStatus && impl->dropAccepted;
+      impl->dropOfferActive = false;
+      impl->dropAccepted    = false;
 
-      if (!offerStatus && impl->dropAccepted) {
+      if (accepted) {
         const PuglDataEvent data = {
           PUGL_DATA,
           flags,
@@ -880,6 +888,11 @@ handleMessage(PuglView* view, UINT message, WPARAM wParam, LPARAM lParam)
 
         event.data = data;
       }
+    } else {
+      impl->droppedUrisLen = 0;
+      impl->dropOfferActive = false;
+      impl->dropAccepted    = false;
+      DragFinish((HDROP)wParam);
     }
     break;
   case WM_ENTERSIZEMOVE:
@@ -1517,7 +1530,7 @@ puglRejectOffer(PuglView* const                 view,
                 const int                       regionX,
                 const int                       regionY,
                 const unsigned                  regionWidth,
-                const unsigned                  regionHeight)
+                const unsigned regionHeight)
 {
   (void)regionX;
   (void)regionY;
