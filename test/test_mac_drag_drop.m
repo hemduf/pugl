@@ -1,3 +1,4 @@
+// Copyright 2026 Pugl contributors
 // SPDX-License-Identifier: ISC
 
 // Tests the native MacOS drag-and-drop destination lifecycle
