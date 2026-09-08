@@ -104,8 +104,9 @@ main(int argc, char** argv)
 #endif
 
 #if defined(_WIN32)
-  // Win32 uses WM_DROPFILES, so explicit drag rejection is a successful
-  // no-op.  Rejection must never dispatch data.
+  // Win32 uses WM_DROPFILES, so native rejection happens after the OS drop but
+  // still before Pugl exposes data.  Bad or inactive accept calls must fail,
+  // and rejection must never dispatch data.
   const unsigned dataEventsBeforeReject = test.dataEvents;
   const PuglDataOfferEvent general_offer = {
     PUGL_DATA_OFFER, 0U, 0.0, 0.0, 0.0, PUGL_CLIPBOARD_GENERAL};
@@ -113,6 +114,24 @@ main(int argc, char** argv)
     PUGL_DATA_OFFER, 0U, 0.0, 0.0, 0.0, PUGL_CLIPBOARD_DRAG};
   const PuglDataOfferEvent invalid_offer = {
     PUGL_DATA_OFFER, 0U, 0.0, 0.0, 0.0, (PuglClipboard)-1};
+
+  assert(puglAcceptOffer(test.view,
+                         NULL,
+                         0U,
+                         PUGL_DATA_ACTION_COPY,
+                         0,
+                         0,
+                         1U,
+                         1U) == PUGL_BAD_PARAMETER);
+  assert(puglAcceptOffer(test.view,
+                         &drag_offer,
+                         0U,
+                         PUGL_DATA_ACTION_COPY,
+                         0,
+                         0,
+                         1U,
+                         1U) == PUGL_BAD_PARAMETER);
+  assert(test.dataEvents == dataEventsBeforeReject);
 
   assert(puglRejectOffer(test.view, NULL, 0, 0, 1U, 1U) ==
          PUGL_BAD_PARAMETER);
@@ -134,7 +153,7 @@ main(int argc, char** argv)
 
   // Tear down
   puglFreeView(test.view);
-  puglFreeWorld(test.world);
+  puglFreeWorld(world);
 
   return 0;
 }
