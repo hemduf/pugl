@@ -86,6 +86,18 @@ main(int argc, char** argv)
 
   // Realize, show, then update until the view is exposed
   assert(!puglRealize(test.view));
+
+#if defined(__APPLE__)
+  // The macOS backend used to declare puglRejectOffer() without defining it.
+  // A synthetic drag offer with no active NSDraggingInfo must fail cleanly,
+  // and this assertion also makes the test link the public symbol on macOS.
+  const PuglDataOfferEvent inactive_drag_offer = {
+    PUGL_DATA_OFFER, 0U, 0.0, 0.0, 0.0, PUGL_CLIPBOARD_DRAG};
+  assert(puglRejectOffer(
+           test.view, &inactive_drag_offer, 0, 0, 1U, 1U) ==
+         PUGL_BAD_PARAMETER);
+#endif
+
   assert(puglShow(test.view, PUGL_SHOW_RAISE) <= PUGL_FAILURE);
   while (!test.exposed) {
     assert(!puglUpdate(test.world, -1.0));
