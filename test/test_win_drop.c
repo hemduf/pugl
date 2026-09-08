@@ -19,6 +19,13 @@
 #include <wchar.h>
 
 typedef struct {
+  DWORD pFiles;
+  POINT pt;
+  BOOL  fNC;
+  BOOL  fWide;
+} TestDropFiles;
+
+typedef struct {
   unsigned dataEvents;
   double   x;
   double   y;
@@ -81,14 +88,14 @@ makeDrop(const wchar_t* const first, const wchar_t* const second)
   const size_t firstLen  = wcslen(first) + 1U;
   const size_t secondLen = wcslen(second) + 1U;
   const size_t chars     = firstLen + secondLen + 1U;
-  const size_t bytes     = sizeof(DROPFILES) + chars * sizeof(wchar_t);
+  const size_t bytes     = sizeof(TestDropFiles) + chars * sizeof(wchar_t);
 
   HGLOBAL const memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes);
   assert(memory);
 
-  DROPFILES* const drop = (DROPFILES*)GlobalLock(memory);
+  TestDropFiles* const drop = (TestDropFiles*)GlobalLock(memory);
   assert(drop);
-  drop->pFiles = sizeof(DROPFILES);
+  drop->pFiles = sizeof(TestDropFiles);
   drop->pt.x   = 17;
   drop->pt.y   = 29;
   drop->fNC    = FALSE;
