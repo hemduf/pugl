@@ -97,6 +97,21 @@ if platform == 'mac'
   )
 endif
 
+# Win32 native drag-and-drop regression
+if platform == 'win'
+  test(
+    'win_drop',
+    executable(
+      'test_win_drop',
+      'test_win_drop.c',
+      c_args: test_c_args + platform_args,
+      dependencies: [pugl_dep, pugl_stub_dep, shlwapi_dep],
+      implicit_include_directories: false,
+    ),
+    suite: 'unit',
+  )
+endif
+
 # Tests that need an OpenGL backend
 if opengl_dep.found()
   foreach test : gl_tests
