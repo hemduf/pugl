@@ -848,14 +848,38 @@ handleMessage(PuglView* view, UINT message, WPARAM wParam, LPARAM lParam)
       }
       DragFinish(drop);
 
-      POINT rpt = pt;
-      ClientToScreen(view->impl->hwnd, &rpt);
+      const PuglEventFlags flags = event.any.flags;
+      const double         time  = GetMessageTime() / 1e3;
+      const PuglDataOfferEvent offer = {
+        PUGL_DATA_OFFER,
+        flags,
+        time,
+        (double)pt.x,
+        (double)pt.y,
+        PUGL_CLIPBOARD_DRAG,
+      };
 
-      event.data.type      = PUGL_DATA;
-      event.data.time      = GetMessageTime() / 1e3;
-      event.data.x         = pt.x;
-      event.data.y         = pt.y;
-      event.data.clipboard = PUGL_CLIPBOARD_DRAG;
+      PuglEvent offerEvent;
+      offerEvent.offer = offer;
+
+      impl->dropOfferActive = true;
+      impl->dropAccepted    = false;
+      const PuglStatus offerStatus = puglDispatchEvent(view, &offerEvent);
+      impl->dropOfferActive          = false;
+
+      if (!offerStatus && impl->dropAccepted) {
+        const PuglDataEvent data = {
+          PUGL_DATA,
+          flags,
+          time,
+          (double)pt.x,
+          (double)pt.y,
+          PUGL_CLIPBOARD_DRAG,
+          0U,
+        };
+
+        event.data = data;
+      }
     }
     break;
   case WM_ENTERSIZEMOVE:
@@ -1451,8 +1475,25 @@ puglAcceptOffer(PuglView* const                 view,
   (void)regionWidth;
   (void)regionHeight;
 
-  if (typeIndex != 0) {
+  if (!offer) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (typeIndex != 0U) {
     return PUGL_UNSUPPORTED;
+  }
+
+  if (offer->clipboard == PUGL_CLIPBOARD_DRAG) {
+    if (!view->impl->dropOfferActive || !view->impl->droppedUrisLen) {
+      return PUGL_BAD_PARAMETER;
+    }
+
+    view->impl->dropAccepted = true;
+    return PUGL_SUCCESS;
+  }
+
+  if (offer->clipboard != PUGL_CLIPBOARD_GENERAL) {
+    return PUGL_BAD_PARAMETER;
   }
 
   const PuglDataEvent data = {
@@ -1478,7 +1519,6 @@ puglRejectOffer(PuglView* const                 view,
                 const unsigned                  regionWidth,
                 const unsigned                  regionHeight)
 {
-  (void)view;
   (void)regionX;
   (void)regionY;
   (void)regionWidth;
@@ -1490,9 +1530,14 @@ puglRejectOffer(PuglView* const                 view,
 
   switch (offer->clipboard) {
   case PUGL_CLIPBOARD_GENERAL:
+    return PUGL_SUCCESS;
   case PUGL_CLIPBOARD_DRAG:
-    // WM_DROPFILES has no rejectable pre-drop offer.  Explicit rejection is
-    // therefore a successful no-op, matching the portable consumer behavior.
+    // WM_DROPFILES can not be rejected at the OS level because it is delivered
+    // after the native drop.  Pugl still exposes a DATA_OFFER before DATA, so
+    // clearing this per-view decision suppresses Pugl data delivery.
+    if (view->impl->dropOfferActive) {
+      view->impl->dropAccepted = false;
+    }
     return PUGL_SUCCESS;
   }
 
