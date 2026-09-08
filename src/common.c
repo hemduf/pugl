@@ -396,28 +396,3 @@ puglGetViewStyle(const PuglView* const view)
 {
   return view->lastConfigure.style;
 }
-
-#if defined(_WIN32)
-PuglStatus
-puglRejectOffer(PuglView* const                 view,
-                const PuglDataOfferEvent* const offer,
-                const int                       regionX,
-                const int                       regionY,
-                const unsigned                  regionWidth,
-                const unsigned                  regionHeight)
-{
-  (void)view;
-  (void)regionX;
-  (void)regionY;
-  (void)regionWidth;
-  (void)regionHeight;
-
-  if (!offer) {
-    return PUGL_BAD_PARAMETER;
-  }
-
-  return offer->clipboard == PUGL_CLIPBOARD_GENERAL ? PUGL_SUCCESS
-         : offer->clipboard == PUGL_CLIPBOARD_DRAG  ? PUGL_UNSUPPORTED
-                                                    : PUGL_BAD_PARAMETER;
-}
-#endif

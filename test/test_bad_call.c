@@ -104,14 +104,15 @@ main(int argc, char** argv)
 #endif
 
 #if defined(_WIN32)
-  // Win32 uses WM_DROPFILES, so only general clipboard offers can currently be
-  // explicitly rejected before data delivery.  Drag offer rejection is not
-  // supported until the backend gains a negotiable pre-drop protocol.
+  // Win32 uses WM_DROPFILES, so explicit drag rejection is a successful
+  // no-op.  Rejection must never dispatch data.
   const unsigned dataEventsBeforeReject = test.dataEvents;
   const PuglDataOfferEvent general_offer = {
     PUGL_DATA_OFFER, 0U, 0.0, 0.0, 0.0, PUGL_CLIPBOARD_GENERAL};
   const PuglDataOfferEvent drag_offer = {
     PUGL_DATA_OFFER, 0U, 0.0, 0.0, 0.0, PUGL_CLIPBOARD_DRAG};
+  const PuglDataOfferEvent invalid_offer = {
+    PUGL_DATA_OFFER, 0U, 0.0, 0.0, 0.0, (PuglClipboard)-1};
 
   assert(puglRejectOffer(test.view, NULL, 0, 0, 1U, 1U) ==
          PUGL_BAD_PARAMETER);
@@ -119,7 +120,10 @@ main(int argc, char** argv)
          PUGL_SUCCESS);
   assert(test.dataEvents == dataEventsBeforeReject);
   assert(puglRejectOffer(test.view, &drag_offer, 0, 0, 1U, 1U) ==
-         PUGL_UNSUPPORTED);
+         PUGL_SUCCESS);
+  assert(test.dataEvents == dataEventsBeforeReject);
+  assert(puglRejectOffer(test.view, &invalid_offer, 0, 0, 1U, 1U) ==
+         PUGL_BAD_PARAMETER);
   assert(test.dataEvents == dataEventsBeforeReject);
 #endif
 

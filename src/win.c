@@ -809,22 +809,38 @@ handleMessage(PuglView* view, UINT message, WPARAM wParam, LPARAM lParam)
           const HRESULT hres   = UrlCreateFromPath(path, url, &urlLen, 0);
           if (!FAILED(hres)) {
 #ifdef UNICODE
-            const int len =
+            const int utf8Len =
               WideCharToMultiByte(CP_UTF8, 0, url, -1, NULL, 0, NULL, NULL);
+            if (utf8Len <= 0) {
+              continue;
+            }
 
-            impl->droppedUris = (char*)realloc(
-              impl->droppedUris, impl->droppedUrisLen + (size_t)len + 2U);
+            const size_t uriLen = (size_t)utf8Len - 1U;
+            char* const resized = (char*)realloc(
+              impl->droppedUris, impl->droppedUrisLen + uriLen + 2U);
+            if (!resized) {
+              continue;
+            }
 
-            char* const end = impl->droppedUris + impl->droppedUrisLen;
-            WideCharToMultiByte(CP_UTF8, 0, url, -1, end, len, NULL, NULL);
+            impl->droppedUris = resized;
+            char* const end   = impl->droppedUris + impl->droppedUrisLen;
+            if (!WideCharToMultiByte(
+                  CP_UTF8, 0, url, -1, end, utf8Len, NULL, NULL)) {
+              continue;
+            }
 #else
-            impl->droppedUris = (char*)realloc(
-              impl->droppedUris, impl->droppedUrisLen + urlLen + 2);
+            const size_t uriLen = (size_t)urlLen;
+            char* const resized = (char*)realloc(
+              impl->droppedUris, impl->droppedUrisLen + uriLen + 2U);
+            if (!resized) {
+              continue;
+            }
 
-            memcpy(impl->droppedUris + impl->droppedUrisLen, url, urlLen + 1);
+            impl->droppedUris = resized;
+            memcpy(impl->droppedUris + impl->droppedUrisLen, url, uriLen + 1U);
 #endif
 
-            impl->droppedUrisLen += urlLen;
+            impl->droppedUrisLen += uriLen;
             impl->droppedUris[impl->droppedUrisLen++] = '\n';
             impl->droppedUris[impl->droppedUrisLen]   = 0;
           }
@@ -1452,6 +1468,35 @@ puglAcceptOffer(PuglView* const                 view,
   PuglEvent dataEvent;
   dataEvent.data = data;
   return puglDispatchEvent(view, &dataEvent);
+}
+
+PuglStatus
+puglRejectOffer(PuglView* const                 view,
+                const PuglDataOfferEvent* const offer,
+                const int                       regionX,
+                const int                       regionY,
+                const unsigned                  regionWidth,
+                const unsigned                  regionHeight)
+{
+  (void)view;
+  (void)regionX;
+  (void)regionY;
+  (void)regionWidth;
+  (void)regionHeight;
+
+  if (!offer) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  switch (offer->clipboard) {
+  case PUGL_CLIPBOARD_GENERAL:
+  case PUGL_CLIPBOARD_DRAG:
+    // WM_DROPFILES has no rejectable pre-drop offer.  Explicit rejection is
+    // therefore a successful no-op, matching the portable consumer behavior.
+    return PUGL_SUCCESS;
+  }
+
+  return PUGL_BAD_PARAMETER;
 }
 
 const void*
