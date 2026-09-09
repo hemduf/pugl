@@ -50,7 +50,7 @@ main(int argc, char** argv)
   // On a fresh X server there is no CLIPBOARD owner. XConvertSelection then
   // returns SelectionNotify with property == None. Processing that response
   // must not pass atom 0 to XGetWindowProperty or emit an X11 BadAtom error.
-  assert(!puglPaste(view, PUGL_CLIPBOARD_GENERAL));
+  assert(!puglPaste(view));
   for (unsigned i = 0U; i < 8U; ++i) {
     assert(!puglUpdate(world, 1 / 120.0));
   }
