@@ -1,0 +1,223 @@
+name: Validate X11 empty clipboard fix
+
+on:
+  push:
+    branches: [fix/x11-empty-clipboard]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validate-x11-empty-clipboard
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.13'
+  MESON_VERSION: '1.11.2'
+  NINJA_VERSION: '1.13.2'
+  PLAYWRIGHT_VERSION: '1.62.0'
+
+jobs:
+  linux:
+    name: Linux X11
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install build tools and X11 dependencies
+        run: |
+          python -m pip install "meson==${MESON_VERSION}" "ninja==${NINJA_VERSION}"
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev xvfb
+      - name: Configure
+        run: >-
+          meson setup build
+          -Dbuildtype=debug
+          -Dbindings_cpp=disabled
+          -Dcairo=disabled
+          -Ddocs=disabled
+          -Dexamples=disabled
+          -Dinstall=disabled
+          -Dopengl=disabled
+          -Dstub=true
+          -Dtests=enabled
+          -Dvulkan=disabled
+          -Dwarning_level=3
+          -Dwerror=true
+          -Dxcursor=disabled
+          -Dxrandr=disabled
+      - name: Build
+        run: meson compile -C build
+      - name: Focused regression
+        run: xvfb-run -a meson test -C build x11_empty_clipboard --print-errorlogs
+      - name: Full tests
+        run: xvfb-run -a meson test -C build --print-errorlogs
+
+  macos:
+    name: macOS
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install build tools
+        run: python -m pip install "meson==${MESON_VERSION}" "ninja==${NINJA_VERSION}"
+      - name: Configure
+        run: >-
+          meson setup build
+          -Dbuildtype=debug
+          -Dbindings_cpp=disabled
+          -Dcairo=disabled
+          -Ddocs=disabled
+          -Dexamples=disabled
+          -Dinstall=disabled
+          -Dopengl=disabled
+          -Dstub=true
+          -Dtests=enabled
+          -Dvulkan=disabled
+          -Dwarning_level=3
+          -Dwerror=true
+      - name: Build
+        run: meson compile -C build
+      - name: Test
+        run: |
+          sudo sysctl -w kern.timer.coalescing_enabled=0
+          caffeinate -dimsu meson test -C build --print-errorlogs --num-processes 1
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install build tools
+        shell: pwsh
+        run: python -m pip install "meson==$env:MESON_VERSION" "ninja==$env:NINJA_VERSION"
+      - name: Configure
+        shell: pwsh
+        run: >-
+          meson setup build
+          -Dbuildtype=debug
+          -Dbindings_cpp=disabled
+          -Dcairo=disabled
+          -Ddocs=disabled
+          -Dexamples=disabled
+          -Dinstall=disabled
+          -Dopengl=disabled
+          -Dstub=true
+          -Dtests=enabled
+          -Dvulkan=disabled
+          -Dwarning_level=3
+          -Dwerror=true
+      - name: Build
+        shell: pwsh
+        run: meson compile -C build
+      - name: Test
+        shell: pwsh
+        run: meson test -C build --print-errorlogs
+
+  wasm:
+    name: WebAssembly / Emscripten
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install build tools
+        run: >-
+          python -m pip install
+          "meson==${MESON_VERSION}"
+          "ninja==${NINJA_VERSION}"
+          "playwright==${PLAYWRIGHT_VERSION}"
+      - name: Set up Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: '6.0.5'
+          actions-cache-folder: emsdk-cache
+      - name: Configure
+        run: >-
+          meson setup build-wasm
+          --cross-file build-aux/emscripten.ini
+          -Dbindings_cpp=disabled
+          -Dcairo=disabled
+          -Ddocs=disabled
+          -Dexamples=enabled
+          -Dinstall=disabled
+          -Dopengl=enabled
+          -Dstub=true
+          -Dtests=enabled
+          -Dvulkan=disabled
+      - name: Build and link tests
+        run: meson compile -C build-wasm
+      - name: Install headless Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Run browser harness
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_harness.html
+          --diagnostics-dir build-wasm/browser-diagnostics/smoke
+      - name: Run lifecycle browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_lifecycle.html
+          --passive
+          --diagnostics-dir build-wasm/browser-diagnostics/lifecycle
+      - name: Run input browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_input.html
+          --pugl-input
+          --diagnostics-dir build-wasm/browser-diagnostics/input
+      - name: Run services browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_services.html
+          --passive
+          --clipboard
+          --diagnostics-dir build-wasm/browser-diagnostics/services
+      - name: Run WebGL browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_webgl.html
+          --passive
+          --diagnostics-dir build-wasm/browser-diagnostics/webgl
+      - name: Run browser demo artifact smoke test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/examples/pugl_wasm_demo.html
+          --demo
+          --diagnostics-dir build-wasm/browser-diagnostics/demo
+
+  cleanup:
+    name: Remove transient validator
+    if: ${{ success() }}
+    needs: [linux, macos, windows, wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/x11-empty-clipboard
+          fetch-depth: 0
+      - name: Remove transient workflow at latest branch head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin fix/x11-empty-clipboard
+          git reset --hard origin/fix/x11-empty-clipboard
+          rm -f .github/workflows/validate-x11-empty-clipboard.yml
+          git diff --check
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'ci: remove transient X11 validator'
+          git push origin HEAD:fix/x11-empty-clipboard
