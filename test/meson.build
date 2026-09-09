@@ -82,6 +82,22 @@ foreach test : basic_exclusive_tests
   )
 endforeach
 
+# X11 clipboard regression that requires a fresh selection owner state
+if platform == 'x11'
+  test(
+    'x11_empty_clipboard',
+    executable(
+      'test_x11_empty_clipboard',
+      'test_x11_empty_clipboard.c',
+      c_args: test_c_args,
+      dependencies: [pugl_dep, pugl_stub_dep, puglutil_dep],
+      implicit_include_directories: false,
+    ),
+    is_parallel: false,
+    suite: 'unit',
+  )
+endif
+
 # MacOS native drag-and-drop destination regression
 if platform == 'mac'
   test(
