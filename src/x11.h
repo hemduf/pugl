@@ -18,6 +18,65 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/**
+   Read an X11 window property without sending an invalid Atom to the server.
+
+   Selection conversion failure is reported by X11 with
+   `SelectionNotify.property == None`.  Passing that value to
+   XGetWindowProperty() triggers the process-wide Xlib BadAtom error handler.
+   Keep internal property reads synchronous and recoverable instead.
+*/
+static inline int
+puglX11GetWindowProperty(Display* const        display,
+                         const Window          window,
+                         const Atom            property,
+                         const long            longOffset,
+                         const long            longLength,
+                         const Bool            deleteProperty,
+                         const Atom            requestedType,
+                         Atom* const           actualType,
+                         int* const            actualFormat,
+                         unsigned long* const  numItems,
+                         unsigned long* const  bytesAfter,
+                         unsigned char** const value)
+{
+  if (property == None) {
+    if (actualType) {
+      *actualType = None;
+    }
+    if (actualFormat) {
+      *actualFormat = 0;
+    }
+    if (numItems) {
+      *numItems = 0U;
+    }
+    if (bytesAfter) {
+      *bytesAfter = 0U;
+    }
+    if (value) {
+      *value = NULL;
+    }
+
+    return BadAtom;
+  }
+
+  return XGetWindowProperty(display,
+                            window,
+                            property,
+                            longOffset,
+                            longLength,
+                            deleteProperty,
+                            requestedType,
+                            actualType,
+                            actualFormat,
+                            numItems,
+                            bytesAfter,
+                            value);
+}
+
+// Route Pugl's internal property reads through the checked wrapper above.
+#define XGetWindowProperty puglX11GetWindowProperty
+
 typedef struct {
   Atom CLIPBOARD;
   Atom UTF8_STRING;
