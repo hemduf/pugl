@@ -112,6 +112,21 @@ if platform == 'win'
   )
 endif
 
+# X11 clipboard conversion failure regression
+if platform == 'x11'
+  test(
+    'x11_clipboard_no_owner',
+    executable(
+      'test_x11_clipboard_no_owner',
+      'test_x11_clipboard_no_owner.c',
+      c_args: test_c_args,
+      dependencies: [pugl_dep, pugl_stub_dep, x11_dep],
+      implicit_include_directories: false,
+    ),
+    suite: 'unit',
+  )
+endif
+
 # Tests that need an OpenGL backend
 if opengl_dep.found()
   foreach test : gl_tests
