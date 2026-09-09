@@ -144,8 +144,17 @@ main(void)
   assert(!puglRegisterDropType(view, "text/uri-list"));
   assert(!puglRealize(view));
 
-  NSView* const destination = (NSView*)puglGetNativeView(view);
-  assert(destination);
+  NSView* const nativeView = (NSView*)puglGetNativeView(view);
+  assert(nativeView);
+
+  // A real external drag is routed by AppKit, not by a test manually choosing
+  // PuglWrapperView as the destination.  The owning window must therefore be
+  // a registered destination as a fallback when a rendering subview covers
+  // the wrapper view.
+  NSWindow* const destinationWindow = [nativeView window];
+  assert(destinationWindow);
+  assert([[destinationWindow registeredDraggedTypes]
+    containsObject:@"public.file-url"]);
 
   NSPasteboard* const pasteboard =
     [NSPasteboard pasteboardWithName:@"PuglMacDragDropTestPasteboard"];
@@ -159,7 +168,7 @@ main(void)
     [[TestDraggingInfo alloc] initWithPasteboard:pasteboard location:location];
 
   id<NSDraggingDestination> const dragDestination =
-    (id<NSDraggingDestination>)destination;
+    (id<NSDraggingDestination>)destinationWindow;
 
   // Entering/accepting an offer must not deliver PUGL_DATA before the drop.
   const NSDragOperation entered =
@@ -188,7 +197,7 @@ main(void)
   // Cocoa drag locations are in window points.  Pugl events are view-relative
   // physical coordinates, so verify the same conversion used by other input.
   const NSPoint expectedPoint =
-    [destination convertPoint:location fromView:nil];
+    [nativeView convertPoint:location fromView:nil];
   const double scale = puglGetScaleFactor(view);
   assert(fabs(state.dataX - expectedPoint.x * scale) < 0.001);
   assert(fabs(state.dataY - expectedPoint.y * scale) < 0.001);
