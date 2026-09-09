@@ -1,0 +1,69 @@
+name: Apply focused X11 empty-clipboard fix
+
+on:
+  push:
+    branches: [fix/x11-empty-clipboard]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sanitize-automation-history
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/x11-empty-clipboard
+          fetch-depth: 0
+
+      - name: Apply minimal GREEN and remove this transient workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/x11.c')
+          text = path.read_text()
+          old = '''  if (!board) {
+            return PUGL_SUCCESS; // Ignore unknown selection
+          }
+
+          PuglInternals* const impl      = view->impl;
+          '''
+          new = '''  if (!board) {
+            return PUGL_SUCCESS; // Ignore unknown selection
+          }
+
+          // A failed selection conversion is reported with property == None.
+          // Never pass atom 0 to XGetWindowProperty.  Clear stale general
+          // clipboard state, while leaving drag-and-drop state unchanged.
+          if (event->property == None) {
+            if (selection == atoms->CLIPBOARD) {
+              clearX11Clipboard(board);
+            }
+            return PUGL_SUCCESS;
+          }
+
+          PuglInternals* const impl      = view->impl;
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one handleSelectionNotify insertion point, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          git rm .github/workflows/apply-x11-empty-clipboard-fix.yml
+          git diff --check
+          grep -A15 -B5 'failed selection conversion' src/x11.c
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/x11.c
+          git commit -m 'X11: ignore failed selection conversions'
+          git push origin HEAD:fix/x11-empty-clipboard
