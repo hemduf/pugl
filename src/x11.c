@@ -1730,6 +1730,16 @@ handleSelectionNotify(const PuglWorld* const       world,
     return PUGL_SUCCESS; // Ignore unknown selection
   }
 
+  // A failed selection conversion is reported with property == None.
+  // Never pass atom 0 to XGetWindowProperty.  Clear stale general
+  // clipboard state, while leaving drag-and-drop state unchanged.
+  if (event->property == None) {
+    if (selection == atoms->CLIPBOARD) {
+      clearX11Clipboard(board);
+    }
+    return PUGL_SUCCESS;
+  }
+
   PuglInternals* const impl      = view->impl;
   Display* const       display   = view->world->impl->display;
   PuglEvent            puglEvent = {{PUGL_NOTHING, 0U}};
