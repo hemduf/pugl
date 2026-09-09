@@ -9,12 +9,52 @@
 
 #import <Cocoa/Cocoa.h>
 
-@interface PuglStubView : NSView
+@interface PuglStubView : NSView<NSDraggingDestination>
 @end
 
 @implementation PuglStubView {
 @public
   PuglView* puglview;
+}
+
+- (id<NSDraggingDestination>)dragDestination
+{
+  return (id<NSDraggingDestination>)[self superview];
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender
+{
+  return [[self dragDestination] draggingEntered:sender];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender
+{
+  return [[self dragDestination] draggingUpdated:sender];
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)sender
+{
+  [[self dragDestination] draggingExited:sender];
+}
+
+- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)sender
+{
+  return [[self dragDestination] prepareForDragOperation:sender];
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender
+{
+  return [[self dragDestination] performDragOperation:sender];
+}
+
+- (void)concludeDragOperation:(id<NSDraggingInfo>)sender
+{
+  [[self dragDestination] concludeDragOperation:sender];
+}
+
+- (void)draggingEnded:(id<NSDraggingInfo>)sender
+{
+  [[self dragDestination] draggingEnded:sender];
 }
 
 - (void)resizeWithOldSuperviewSize:(NSSize)oldSize
@@ -50,6 +90,10 @@ puglMacStubCreate(PuglView* view)
     [drawView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   } else {
     [drawView setAutoresizingMask:NSViewNotSizable];
+  }
+
+  if (impl->registeredDropTypes) {
+    [drawView registerForDraggedTypes:impl->registeredDropTypes];
   }
 
   impl->drawView = drawView;

@@ -144,8 +144,18 @@ main(void)
   assert(!puglRegisterDropType(view, "text/uri-list"));
   assert(!puglRealize(view));
 
-  NSView* const destination = (NSView*)puglGetNativeView(view);
-  assert(destination);
+  NSView* const nativeView = (NSView*)puglGetNativeView(view);
+  assert(nativeView);
+
+  // Backends render into a full-size child view.  AppKit may choose that
+  // deepest view as the external drag destination, so it must be registered
+  // and forward the destination lifecycle to the Pugl wrapper.
+  NSArray<NSView*>* const subviews = [nativeView subviews];
+  assert([subviews count] == 1U);
+  NSView* const destinationView = [subviews objectAtIndex:0U];
+  assert([[destinationView registeredDraggedTypes]
+    containsObject:@"public.file-url"]);
+  assert([destinationView conformsToProtocol:@protocol(NSDraggingDestination)]);
 
   NSPasteboard* const pasteboard =
     [NSPasteboard pasteboardWithName:@"PuglMacDragDropTestPasteboard"];
@@ -159,7 +169,7 @@ main(void)
     [[TestDraggingInfo alloc] initWithPasteboard:pasteboard location:location];
 
   id<NSDraggingDestination> const dragDestination =
-    (id<NSDraggingDestination>)destination;
+    (id<NSDraggingDestination>)destinationView;
 
   // Entering/accepting an offer must not deliver PUGL_DATA before the drop.
   const NSDragOperation entered =
@@ -188,7 +198,7 @@ main(void)
   // Cocoa drag locations are in window points.  Pugl events are view-relative
   // physical coordinates, so verify the same conversion used by other input.
   const NSPoint expectedPoint =
-    [destination convertPoint:location fromView:nil];
+    [nativeView convertPoint:location fromView:nil];
   const double scale = puglGetScaleFactor(view);
   assert(fabs(state.dataX - expectedPoint.x * scale) < 0.001);
   assert(fabs(state.dataY - expectedPoint.y * scale) < 0.001);
