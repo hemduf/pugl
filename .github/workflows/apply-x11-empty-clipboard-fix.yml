@@ -12,6 +12,12 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/x11-empty-clipboard
+          fetch-depth: 0
+
       - name: Apply minimal GREEN and remove this transient workflow
         shell: bash
         run: |
