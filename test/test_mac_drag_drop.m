@@ -147,14 +147,15 @@ main(void)
   NSView* const nativeView = (NSView*)puglGetNativeView(view);
   assert(nativeView);
 
-  // A real external drag is routed by AppKit, not by a test manually choosing
-  // PuglWrapperView as the destination.  The owning window must therefore be
-  // a registered destination as a fallback when a rendering subview covers
-  // the wrapper view.
-  NSWindow* const destinationWindow = [nativeView window];
-  assert(destinationWindow);
-  assert([[destinationWindow registeredDraggedTypes]
+  // Backends render into a full-size child view.  AppKit may choose that
+  // deepest view as the external drag destination, so it must be registered
+  // and forward the destination lifecycle to the Pugl wrapper.
+  NSArray<NSView*>* const subviews = [nativeView subviews];
+  assert([subviews count] == 1U);
+  NSView* const destinationView = [subviews objectAtIndex:0U];
+  assert([[destinationView registeredDraggedTypes]
     containsObject:@"public.file-url"]);
+  assert([destinationView conformsToProtocol:@protocol(NSDraggingDestination)]);
 
   NSPasteboard* const pasteboard =
     [NSPasteboard pasteboardWithName:@"PuglMacDragDropTestPasteboard"];
@@ -168,7 +169,7 @@ main(void)
     [[TestDraggingInfo alloc] initWithPasteboard:pasteboard location:location];
 
   id<NSDraggingDestination> const dragDestination =
-    (id<NSDraggingDestination>)destinationWindow;
+    (id<NSDraggingDestination>)destinationView;
 
   // Entering/accepting an offer must not deliver PUGL_DATA before the drop.
   const NSDragOperation entered =
