@@ -35,32 +35,25 @@ jobs:
           path = Path('src/x11.c')
           text = path.read_text()
           marker = 'A failed selection conversion is reported with property == None.'
-          old = '''  if (!board) {
-            return PUGL_SUCCESS; // Ignore unknown selection
-          }
-
-          PuglInternals* const impl      = view->impl;
-          '''
-          new = '''  if (!board) {
-            return PUGL_SUCCESS; // Ignore unknown selection
-          }
-
-          // A failed selection conversion is reported with property == None.
-          // Never pass atom 0 to XGetWindowProperty.  Clear stale general
-          // clipboard state, while leaving drag-and-drop state unchanged.
-          if (event->property == None) {
-            if (selection == atoms->CLIPBOARD) {
-              clearX11Clipboard(board);
-            }
-            return PUGL_SUCCESS;
-          }
-
-          PuglInternals* const impl      = view->impl;
-          '''
+          anchor = '    return PUGL_SUCCESS; // Ignore unknown selection\n  }\n\n  PuglInternals* const impl      = view->impl;\n'
+          insert = (
+              '    return PUGL_SUCCESS; // Ignore unknown selection\n'
+              '  }\n\n'
+              '  // A failed selection conversion is reported with property == None.\n'
+              '  // Never pass atom 0 to XGetWindowProperty.  Clear stale general\n'
+              '  // clipboard state, while leaving drag-and-drop state unchanged.\n'
+              '  if (event->property == None) {\n'
+              '    if (selection == atoms->CLIPBOARD) {\n'
+              '      clearX11Clipboard(board);\n'
+              '    }\n'
+              '    return PUGL_SUCCESS;\n'
+              '  }\n\n'
+              '  PuglInternals* const impl      = view->impl;\n'
+          )
           if marker not in text:
-              if text.count(old) != 1:
-                  raise SystemExit(f'expected one handleSelectionNotify insertion point, found {text.count(old)}')
-              path.write_text(text.replace(old, new, 1))
+              if text.count(anchor) != 1:
+                  raise SystemExit(f'expected one handleSelectionNotify insertion point, found {text.count(anchor)}')
+              path.write_text(text.replace(anchor, insert, 1))
           PY
 
             rm -f .github/workflows/apply-x11-empty-clipboard-fix.yml
