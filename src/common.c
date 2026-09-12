@@ -113,18 +113,18 @@ puglSetDefaultHints(PuglView* const view)
   view->hints[PUGL_RED_BITS]              = 8;
   view->hints[PUGL_GREEN_BITS]            = 8;
   view->hints[PUGL_BLUE_BITS]             = 8;
-  view->hints[PUGL_ALPHA_BITS]            = 8;
-  view->hints[PUGL_DEPTH_BITS]            = 0;
-  view->hints[PUGL_STENCIL_BITS]          = 0;
-  view->hints[PUGL_SAMPLE_BUFFERS]        = PUGL_DONT_CARE;
-  view->hints[PUGL_SAMPLES]               = 0;
-  view->hints[PUGL_DOUBLE_BUFFER]         = PUGL_TRUE;
-  view->hints[PUGL_SWAP_INTERVAL]         = PUGL_DONT_CARE;
-  view->hints[PUGL_RESIZABLE]             = PUGL_FALSE;
-  view->hints[PUGL_IGNORE_KEY_REPEAT]     = PUGL_FALSE;
-  view->hints[PUGL_REFRESH_RATE]          = PUGL_DONT_CARE;
-  view->hints[PUGL_VIEW_TYPE]             = PUGL_DONT_CARE;
-  view->hints[PUGL_ACCEPT_DROP]           = PUGL_DONT_CARE;
+  view->hints[PUGL_ALPHA_BITS]             = 8;
+  view->hints[PUGL_DEPTH_BITS]             = 0;
+  view->hints[PUGL_STENCIL_BITS]           = 0;
+  view->hints[PUGL_SAMPLE_BUFFERS]         = PUGL_DONT_CARE;
+  view->hints[PUGL_SAMPLES]                = 0;
+  view->hints[PUGL_DOUBLE_BUFFER]          = PUGL_TRUE;
+  view->hints[PUGL_SWAP_INTERVAL]          = PUGL_DONT_CARE;
+  view->hints[PUGL_RESIZABLE]              = PUGL_FALSE;
+  view->hints[PUGL_IGNORE_KEY_REPEAT]      = PUGL_FALSE;
+  view->hints[PUGL_REFRESH_RATE]           = PUGL_DONT_CARE;
+  view->hints[PUGL_VIEW_TYPE]              = PUGL_DONT_CARE;
+  view->hints[PUGL_ACCEPT_DROP]            = PUGL_DONT_CARE;
 
   for (unsigned i = 0U; i < PUGL_NUM_POSITION_HINTS; ++i) {
     view->positionHints[i].x = INT16_MIN;
@@ -277,7 +277,8 @@ puglSetViewString(PuglView* const      view,
   }
 
   const PuglStatus st = puglSetString(&view->strings[key], value);
-  return st ? st : puglApplyViewString(view, key, view->strings[key]);
+  const char* const appliedValue = view->strings[key] ? view->strings[key] : "";
+  return st ? st : puglApplyViewString(view, key, appliedValue);
 }
 
 const char*
