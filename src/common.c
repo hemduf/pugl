@@ -277,7 +277,8 @@ puglSetViewString(PuglView* const      view,
   }
 
   const PuglStatus st = puglSetString(&view->strings[key], value);
-  return st ? st : puglApplyViewString(view, key, view->strings[key]);
+  const char* const appliedValue = view->strings[key] ? view->strings[key] : "";
+  return st ? st : puglApplyViewString(view, key, appliedValue);
 }
 
 const char*
