@@ -90,6 +90,14 @@ main(int argc, char** argv)
   // Check that puglGetNativeView() returns something
   assert(puglGetNativeView(test.view));
 
+  // Runtime title updates must allow clearing a realized native window title.
+  assert(!puglSetViewString(test.view, PUGL_WINDOW_TITLE, "Updated title"));
+  assert(!strcmp(puglGetViewString(test.view, PUGL_WINDOW_TITLE), "Updated title"));
+  assert(!puglSetViewString(test.view, PUGL_WINDOW_TITLE, ""));
+  assert(!puglGetViewString(test.view, PUGL_WINDOW_TITLE));
+  assert(!puglSetViewString(test.view, PUGL_WINDOW_TITLE, "Restored title"));
+  assert(!strcmp(puglGetViewString(test.view, PUGL_WINDOW_TITLE), "Restored title"));
+
   // Tear down
   puglFreeView(test.view);
   puglFreeWorld(test.world);
