@@ -38,7 +38,7 @@ iOS and iPadOS
 
 The iOS port uses UIKit and is designed primarily for embedding in a
 host-provided `UIView`.  `puglGetNativeView()` returns that wrapper
-`UIView`, and `puglGetNativeWorld()` returns the current `UIScreen`.
+`UIView`, and `puglGetNativeWorld()` returns the world's default `UIScreen`.
 
 The initial iOS backend supports view lifecycle/configure/expose events,
 raw multi-touch pointer input with stable contact IDs, pressure/contact size,
@@ -52,10 +52,11 @@ should embed a Pugl view in an application-owned `UIView`.
 iOS 14 or newer is the supported deployment baseline.
 
 Objective-C class names are process-global.  Plug-ins that statically embed
-Pugl and may coexist with another embedded copy should use a product-unique
-class prefix.  Meson builds can set `-Dios_objc_class_prefix=MyPluginPugl`;
-other build systems can define `PUGL_OBJC_CLASS_PREFIX` while compiling the
-iOS backend.
+Pugl and may coexist with another embedded copy must use a consumer-unique
+class prefix.  iOS Meson builds require
+`-Dios_objc_class_prefix=MyPluginPugl`; other build systems must define
+`PUGL_OBJC_CLASS_PREFIX` while compiling the iOS backend.  The iOS build
+fails if no prefix is provided.
 
 WebAssembly
 -----------
