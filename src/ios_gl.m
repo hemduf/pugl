@@ -30,6 +30,8 @@ puglIosGlEnsureHint(PuglView* const view,
 @public
   PuglView*      puglview;
   EAGLContext*   context;
+  EAGLContext*   previousContext;
+  unsigned       contextDepth;
   GLuint         framebuffer;
   GLuint         colorRenderbuffer;
   GLuint         depthStencilRenderbuffer;
@@ -37,6 +39,8 @@ puglIosGlEnsureHint(PuglView* const view,
   GLint          drawableHeight;
 }
 - (BOOL)resizeDrawable;
+- (BOOL)pushContext;
+- (BOOL)popContext;
 @end
 
 @implementation PuglOpenGLView
@@ -64,9 +68,53 @@ puglIosGlEnsureHint(PuglView* const view,
   return self;
 }
 
+- (BOOL)pushContext
+{
+  EAGLContext* const current = [EAGLContext currentContext];
+
+  if (contextDepth == 0U) {
+    previousContext = [current retain];
+  } else if (current != context) {
+    // Cross-view recursive entry would overwrite the restoration chain.
+    // Fail closed instead of corrupting the host/other instance context.
+    return NO;
+  }
+
+  if (![EAGLContext setCurrentContext:context]) {
+    if (contextDepth == 0U) {
+      [previousContext release];
+      previousContext = nil;
+    }
+    return NO;
+  }
+
+  ++contextDepth;
+  return YES;
+}
+
+- (BOOL)popContext
+{
+  if (!contextDepth) {
+    return NO;
+  }
+
+  --contextDepth;
+  if (contextDepth) {
+    return YES;
+  }
+
+  EAGLContext* const restore = previousContext;
+  previousContext = nil;
+  const BOOL restored = [EAGLContext setCurrentContext:restore];
+  [restore release];
+  return restored;
+}
+
 - (void)destroyDrawable
 {
+  EAGLContext* const previous = [[EAGLContext currentContext] retain];
   if (![EAGLContext setCurrentContext:context]) {
+    [previous release];
     return;
   }
 
@@ -85,14 +133,27 @@ puglIosGlEnsureHint(PuglView* const view,
 
   drawableWidth = 0;
   drawableHeight = 0;
+
+  (void)[EAGLContext setCurrentContext:previous];
+  [previous release];
 }
 
 - (void)dealloc
 {
   [self destroyDrawable];
-  if ([EAGLContext currentContext] == context) {
+
+  // Destruction while explicitly entered is misuse, but restore the captured
+  // outer context defensively rather than leaving this instance current.
+  if (contextDepth) {
+    contextDepth = 0U;
+    EAGLContext* const restore = previousContext;
+    previousContext = nil;
+    (void)[EAGLContext setCurrentContext:restore];
+    [restore release];
+  } else if ([EAGLContext currentContext] == context) {
     [EAGLContext setCurrentContext:nil];
   }
+
   [context release];
   [super dealloc];
 }
@@ -281,11 +342,16 @@ puglIosGlEnter(PuglView* view, const PuglExposeEvent* expose)
   (void)expose;
 
   PuglOpenGLView* const drawView = (PuglOpenGLView*)view->impl->drawView;
-  if (!drawView || ![EAGLContext setCurrentContext:drawView->context]) {
+  if (!drawView || ![drawView pushContext]) {
     return PUGL_FAILURE;
   }
 
-  return [drawView resizeDrawable] ? PUGL_SUCCESS : PUGL_BACKEND_FAILED;
+  if (![drawView resizeDrawable]) {
+    (void)[drawView popContext];
+    return PUGL_BACKEND_FAILED;
+  }
+
+  return PUGL_SUCCESS;
 }
 
 static PuglStatus
@@ -304,7 +370,9 @@ puglIosGlLeave(PuglView* view, const PuglExposeEvent* expose)
                : PUGL_FAILURE;
   }
 
-  [EAGLContext setCurrentContext:nil];
+  if (![drawView popContext] && status == PUGL_SUCCESS) {
+    status = PUGL_FAILURE;
+  }
   return status;
 }
 
