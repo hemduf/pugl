@@ -1186,42 +1186,42 @@ puglUpdate(PuglWorld* world, const double timeout)
 
     world->state = PUGL_WORLD_UPDATING;
 
-  if (world->type == PUGL_PROGRAM && timeout != 0.0) {
-    NSDate* const limit =
-      timeout < 0.0 ? [NSDate distantFuture]
-                    : [NSDate dateWithTimeIntervalSinceNow:timeout];
-    [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode beforeDate:limit];
-  }
-
-  for (size_t i = 0U; i < world->numViews;) {
-    PuglView* const view = world->views[i];
-    if (!view || !view->impl || !view->impl->wrapperView ||
-        view->stage < PUGL_VIEW_STAGE_REALIZED) {
-      ++i;
-      continue;
+    if (world->type == PUGL_PROGRAM && timeout != 0.0) {
+      NSDate* const limit =
+        timeout < 0.0 ? [NSDate distantFuture]
+                      : [NSDate dateWithTimeIntervalSinceNow:timeout];
+      [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode beforeDate:limit];
     }
 
-    PuglWrapperView* const wrapper = [view->impl->wrapperView retain];
-    [wrapper drainPendingEvents];
+    for (size_t i = 0U; i < world->numViews;) {
+      PuglView* const view = world->views[i];
+      if (!view || !view->impl || !view->impl->wrapperView ||
+          view->stage < PUGL_VIEW_STAGE_REALIZED) {
+        ++i;
+        continue;
+      }
 
-    // A queued client event may have destroyed this view.  The retained native
-    // wrapper survives long enough to tell us whether its PuglView is still
-    // attached, without dereferencing a potentially freed PuglView.
-    if (wrapper->puglview == view &&
-        !(puglIosViewStyle(view) & PUGL_VIEW_STYLE_HIDDEN)) {
-      puglDispatchSimpleEvent(view, PUGL_UPDATE);
+      PuglWrapperView* const wrapper = [view->impl->wrapperView retain];
+      [wrapper drainPendingEvents];
+
+      // A queued client event may have destroyed this view.  The retained
+      // wrapper survives long enough to tell us whether its PuglView is still
+      // attached, without dereferencing a potentially freed PuglView.
+      if (wrapper->puglview == view &&
+          !(puglIosViewStyle(view) & PUGL_VIEW_STYLE_HIDDEN)) {
+        puglDispatchSimpleEvent(view, PUGL_UPDATE);
+      }
+
+      const bool sameViewAtIndex =
+        i < world->numViews && world->views[i] == view;
+      [wrapper release];
+
+      // If the callback removed this view, the next view has shifted into the
+      // current slot and must not be skipped.
+      if (sameViewAtIndex) {
+        ++i;
+      }
     }
-
-    const bool sameViewAtIndex =
-      i < world->numViews && world->views[i] == view;
-    [wrapper release];
-
-    // If the callback removed this view, the next view has shifted into the
-    // current slot and must not be skipped.
-    if (sameViewAtIndex) {
-      ++i;
-    }
-  }
 
     world->state = PUGL_WORLD_IDLE;
     return PUGL_SUCCESS;
