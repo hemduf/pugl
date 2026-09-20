@@ -250,6 +250,8 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
     userTimers = [[NSMutableDictionary alloc] init];
     pendingEvents = [[NSMutableArray alloc] init];
     pendingEventLock = [[NSLock alloc] init];
+    activeTouches = [[NSMutableDictionary alloc] init];
+    nextPointerId = 1U;
   }
   return self;
 }
@@ -258,7 +260,7 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
 {
   puglIosInvalidateTimers(self);
 
-  [activeTouch release];
+  [activeTouches release];
   [pendingEventLock release];
   [pendingEvents release];
   [userTimers release];
@@ -412,100 +414,180 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
   puglDispatchEvent(puglview, &event);
 }
 
-- (void)dispatchPointerType:(PuglEventType)type touch:(UITouch*)touch
+static PuglPointerType
+puglIosPointerType(UITouch* const touch)
 {
-  if (!puglview || !touch) {
+  switch (touch.type) {
+  case UITouchTypeDirect:
+    return PUGL_POINTER_TOUCH;
+  case UITouchTypePencil:
+    return PUGL_POINTER_PEN;
+  case UITouchTypeIndirect:
+  case UITouchTypeIndirectPointer:
+    return PUGL_POINTER_MOUSE;
+  }
+
+  return PUGL_POINTER_UNKNOWN;
+}
+
+static double
+puglIosPointerPressure(UITouch* const touch)
+{
+  const CGFloat maximum = touch.maximumPossibleForce;
+  if (maximum <= 0.0) {
+    return NAN;
+  }
+
+  return fmax(0.0, fmin(1.0, (double)(touch.force / maximum)));
+}
+
+- (PuglPointerId)pointerIdForTouch:(UITouch*)touch create:(BOOL)create
+{
+  if (!touch) {
+    return 0U;
+  }
+
+  NSValue* const key = [NSValue valueWithNonretainedObject:touch];
+  NSNumber* const existing = [activeTouches objectForKey:key];
+  if (existing) {
+    return (PuglPointerId)existing.unsignedIntValue;
+  }
+
+  if (!create) {
+    return 0U;
+  }
+
+  PuglPointerId id = 0U;
+  NSArray* const usedIds = [activeTouches allValues];
+  do {
+    id = nextPointerId++;
+    if (!nextPointerId) {
+      nextPointerId = 1U;
+    }
+  } while (!id ||
+           [usedIds containsObject:[NSNumber numberWithUnsignedInt:id]]);
+
+  [activeTouches setObject:[NSNumber numberWithUnsignedInt:id] forKey:key];
+  if (!primaryPointerId && activeTouches.count == 1U) {
+    primaryPointerId = id;
+  }
+
+  return id;
+}
+
+- (void)dispatchPointerType:(PuglEventType)type
+                      touch:(UITouch*)touch
+                  pointerId:(PuglPointerId)pointerId
+                sampleFlags:(PuglPointerFlags)sampleFlags
+{
+  if (!puglview || !touch || !pointerId) {
     return;
   }
 
   const CGFloat scale = puglIosScale(puglview);
   const CGPoint local = [touch locationInView:self];
-  const CGPoint root = [touch locationInView:nil];
-  const double time = puglGetTime(puglview->world);
+  const CGFloat radius = touch.majorRadius;
+  const double contactSize =
+    radius > 0.0 ? (double)(2.0 * radius * scale) : NAN;
+
+  PuglPointerFlags pointerFlags = sampleFlags;
+  if (pointerId == primaryPointerId) {
+    pointerFlags |= PUGL_POINTER_IS_PRIMARY;
+  }
+
+  const PuglPointerEvent pointerEvent = {
+    type,
+    0U,
+    touch.timestamp,
+    local.x * scale,
+    local.y * scale,
+    0U,
+    pointerId,
+    puglIosPointerType(touch),
+    pointerFlags,
+    puglIosPointerPressure(touch),
+    contactSize,
+    contactSize,
+  };
 
   PuglEvent event;
   memset(&event, 0, sizeof(event));
-
-  if (type == PUGL_BUTTON_PRESS || type == PUGL_BUTTON_RELEASE) {
-    event.button = (PuglButtonEvent){
-      type,
-      0U,
-      time,
-      local.x * scale,
-      local.y * scale,
-      root.x * scale,
-      root.y * scale,
-      0U,
-      0U,
-    };
-  } else if (type == PUGL_MOTION) {
-    event.motion = (PuglMotionEvent){
-      PUGL_MOTION,
-      0U,
-      time,
-      local.x * scale,
-      local.y * scale,
-      root.x * scale,
-      root.y * scale,
-      0U,
-    };
-  } else {
-    event.crossing = (PuglCrossingEvent){
-      type,
-      0U,
-      time,
-      local.x * scale,
-      local.y * scale,
-      root.x * scale,
-      root.y * scale,
-      0U,
-      PUGL_CROSSING_NORMAL,
-    };
-  }
-
+  event.pointer = pointerEvent;
   puglDispatchEvent(puglview, &event);
 }
 
 - (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
   (void)event;
-  if (!activeTouch) {
-    activeTouch = [[touches anyObject] retain];
-    if (activeTouch) {
-      [self dispatchPointerType:PUGL_POINTER_IN touch:activeTouch];
-      [self dispatchPointerType:PUGL_BUTTON_PRESS touch:activeTouch];
-    }
+
+  for (UITouch* const touch in touches) {
+    const PuglPointerId pointerId = [self pointerIdForTouch:touch create:YES];
+    [self dispatchPointerType:PUGL_POINTER_DOWN
+                        touch:touch
+                    pointerId:pointerId
+                  sampleFlags:0U];
   }
 }
 
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
-  (void)event;
-  if (activeTouch && [touches containsObject:activeTouch]) {
-    [self dispatchPointerType:PUGL_MOTION touch:activeTouch];
+  for (UITouch* const touch in touches) {
+    const PuglPointerId pointerId = [self pointerIdForTouch:touch create:NO];
+    if (!pointerId) {
+      continue;
+    }
+
+    NSArray<UITouch*>* const samples = [event coalescedTouchesForTouch:touch];
+    if (!samples.count) {
+      [self dispatchPointerType:PUGL_POINTER_MOVE
+                          touch:touch
+                      pointerId:pointerId
+                    sampleFlags:0U];
+      continue;
+    }
+
+    for (NSUInteger i = 0U; i < samples.count; ++i) {
+      const PuglPointerFlags flags =
+        i + 1U < samples.count ? PUGL_POINTER_IS_COALESCED : 0U;
+      [self dispatchPointerType:PUGL_POINTER_MOVE
+                          touch:[samples objectAtIndex:i]
+                      pointerId:pointerId
+                    sampleFlags:flags];
+    }
   }
 }
 
-- (void)finishTouches:(NSSet<UITouch*>*)touches
+- (void)finishTouches:(NSSet<UITouch*>*)touches type:(PuglEventType)type
 {
-  if (activeTouch && [touches containsObject:activeTouch]) {
-    [self dispatchPointerType:PUGL_BUTTON_RELEASE touch:activeTouch];
-    [self dispatchPointerType:PUGL_POINTER_OUT touch:activeTouch];
-    [activeTouch release];
-    activeTouch = nil;
+  for (UITouch* const touch in touches) {
+    const PuglPointerId pointerId = [self pointerIdForTouch:touch create:NO];
+    if (!pointerId) {
+      continue;
+    }
+
+    [self dispatchPointerType:type
+                        touch:touch
+                    pointerId:pointerId
+                  sampleFlags:0U];
+
+    NSValue* const key = [NSValue valueWithNonretainedObject:touch];
+    [activeTouches removeObjectForKey:key];
+    if (primaryPointerId == pointerId) {
+      primaryPointerId = 0U;
+    }
   }
 }
 
 - (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
   (void)event;
-  [self finishTouches:touches];
+  [self finishTouches:touches type:PUGL_POINTER_UP];
 }
 
 - (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
   (void)event;
-  [self finishTouches:touches];
+  [self finishTouches:touches type:PUGL_POINTER_CANCEL];
 }
 
 - (void)dispatchPresses:(NSSet<UIPress*>*)presses type:(PuglEventType)type

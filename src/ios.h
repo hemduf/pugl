@@ -18,7 +18,9 @@
   NSMutableDictionary*  userTimers;
   NSMutableArray*       pendingEvents;
   NSLock*               pendingEventLock;
-  UITouch*              activeTouch;
+  NSMutableDictionary*  activeTouches;
+  PuglPointerId         nextPointerId;
+  PuglPointerId         primaryPointerId;
 }
 
 - (void)dispatchExpose:(CGRect)rect;

@@ -41,7 +41,8 @@ host-provided `UIView`.  `puglGetNativeView()` returns that wrapper
 `UIView`, and `puglGetNativeWorld()` returns the current `UIScreen`.
 
 The initial iOS backend supports view lifecycle/configure/expose events,
-touch-to-pointer input, hardware keyboard input, focus, timers, general
+raw multi-touch pointer input with stable contact IDs, pressure/contact size,
+coalesced motion samples, hardware keyboard input, focus, timers, general
 clipboard operations, invalidation, and OpenGL ES 2/3 through
 `puglGlBackend()`.  Drag-and-drop, desktop cursor shapes, Cairo, and Vulkan are
 not provided by this backend.  A top-level `PUGL_PROGRAM` view is available as

@@ -140,6 +140,18 @@ using EventFlags = PuglEventFlags;
 /// @copydoc PuglCrossingMode
 using CrossingMode = PuglCrossingMode;
 
+/// @copydoc PuglPointerId
+using PointerId = PuglPointerId;
+
+/// @copydoc PuglPointerType
+using PointerType = PuglPointerType;
+
+/// @copydoc PuglPointerFlag
+using PointerFlag = PuglPointerFlag;
+
+/// @copydoc PuglPointerFlags
+using PointerFlags = PuglPointerFlags;
+
 /// @copydoc PuglViewStyleFlag
 using ViewStyleFlag = PuglViewStyleFlag;
 
@@ -202,6 +214,18 @@ using MotionEvent = Event<PUGL_MOTION, PuglMotionEvent>;
 
 /// @copydoc PuglScrollEvent
 using ScrollEvent = Event<PUGL_SCROLL, PuglScrollEvent>;
+
+/// @copydoc PuglPointerEvent
+using PointerDownEvent = Event<PUGL_POINTER_DOWN, PuglPointerEvent>;
+
+/// @copydoc PuglPointerEvent
+using PointerMoveEvent = Event<PUGL_POINTER_MOVE, PuglPointerEvent>;
+
+/// @copydoc PuglPointerEvent
+using PointerUpEvent = Event<PUGL_POINTER_UP, PuglPointerEvent>;
+
+/// @copydoc PuglPointerEvent
+using PointerCancelEvent = Event<PUGL_POINTER_CANCEL, PuglPointerEvent>;
 
 /// @copydoc PuglClientEvent
 using ClientEvent = Event<PUGL_CLIENT, PuglClientEvent>;
@@ -917,6 +941,14 @@ private:
       return target.onEvent(MotionEvent{event->motion});
     case PUGL_SCROLL:
       return target.onEvent(ScrollEvent{event->scroll});
+    case PUGL_POINTER_DOWN:
+      return target.onEvent(PointerDownEvent{event->pointer});
+    case PUGL_POINTER_MOVE:
+      return target.onEvent(PointerMoveEvent{event->pointer});
+    case PUGL_POINTER_UP:
+      return target.onEvent(PointerUpEvent{event->pointer});
+    case PUGL_POINTER_CANCEL:
+      return target.onEvent(PointerCancelEvent{event->pointer});
     case PUGL_CLIENT:
       return target.onEvent(ClientEvent{event->client});
     case PUGL_TIMER:
