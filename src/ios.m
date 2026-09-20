@@ -187,6 +187,11 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
 
   NSString* const text = key.characters;
   for (NSUInteger i = 0U; i < text.length;) {
+    PuglView* const view = wrapper->puglview;
+    if (!view) {
+      break;
+    }
+
     const unichar first = [text characterAtIndex:i++];
     uint32_t scalar = first;
 
@@ -208,7 +213,7 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
     PuglTextEvent textEvent = {
       PUGL_TEXT,
       0U,
-      puglGetTime(wrapper->puglview->world),
+      puglGetTime(view->world),
       0.0,
       0.0,
       0.0,
@@ -223,7 +228,7 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
     PuglEvent event;
     memset(&event, 0, sizeof(event));
     event.text = textEvent;
-    puglDispatchEvent(wrapper->puglview, &event);
+    puglDispatchEvent(view, &event);
   }
 }
 
@@ -1076,17 +1081,33 @@ puglUpdate(PuglWorld* world, const double timeout)
     [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode beforeDate:limit];
   }
 
-  for (size_t i = 0U; i < world->numViews; ++i) {
+  for (size_t i = 0U; i < world->numViews;) {
     PuglView* const view = world->views[i];
     if (!view || !view->impl || !view->impl->wrapperView ||
         view->stage < PUGL_VIEW_STAGE_REALIZED) {
+      ++i;
       continue;
     }
 
-    [view->impl->wrapperView drainPendingEvents];
+    PuglWrapperView* const wrapper = [view->impl->wrapperView retain];
+    [wrapper drainPendingEvents];
 
-    if (!(puglIosViewStyle(view) & PUGL_VIEW_STYLE_HIDDEN)) {
+    // A queued client event may have destroyed this view.  The retained native
+    // wrapper survives long enough to tell us whether its PuglView is still
+    // attached, without dereferencing a potentially freed PuglView.
+    if (wrapper->puglview == view &&
+        !(puglIosViewStyle(view) & PUGL_VIEW_STYLE_HIDDEN)) {
       puglDispatchSimpleEvent(view, PUGL_UPDATE);
+    }
+
+    const bool sameViewAtIndex =
+      i < world->numViews && world->views[i] == view;
+    [wrapper release];
+
+    // If the callback removed this view, the next view has shifted into the
+    // current slot and must not be skipped.
+    if (sameViewAtIndex) {
+      ++i;
     }
   }
 
