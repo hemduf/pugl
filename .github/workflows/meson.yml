@@ -154,6 +154,7 @@ jobs:
           -Ddocs=disabled
           -Dexamples=disabled
           -Dinstall=disabled
+          -Dios_objc_class_prefix=PuglCi
           -Dopengl=enabled
           -Dstub=true
           -Dtests=disabled
