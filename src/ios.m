@@ -226,6 +226,19 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
   }
 }
 
+static void
+puglIosInvalidateTimers(PuglWrapperView* const wrapper)
+{
+  if (!wrapper || !wrapper->userTimers) {
+    return;
+  }
+
+  for (NSTimer* const timer in [wrapper->userTimers allValues]) {
+    [timer invalidate];
+  }
+  [wrapper->userTimers removeAllObjects];
+}
+
 @implementation PuglWrapperView
 
 - (id)initWithFrame:(CGRect)frame
@@ -243,9 +256,7 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
 
 - (void)dealloc
 {
-  for (NSTimer* timer in [userTimers allValues]) {
-    [timer invalidate];
-  }
+  puglIosInvalidateTimers(self);
 
   [activeTouch release];
   [pendingEventLock release];
@@ -724,6 +735,12 @@ puglUnrealize(PuglView* const view)
   (void)[impl->wrapperView resignFirstResponder];
 
   PuglStatus status = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
+
+  // NSTimer retains its target and the run loop retains scheduled timers.
+  // Invalidate every per-view timer before clearing the PuglView back-pointer,
+  // otherwise a destroyed plug-in instance could leave a live timer targeting
+  // an orphaned wrapper and crash on its next tick.
+  puglIosInvalidateTimers(impl->wrapperView);
 
   if (view->backend && impl->drawView) {
     view->backend->destroy(view);
