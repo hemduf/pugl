@@ -25,6 +25,22 @@ puglIosScale(const PuglView* const view)
     return view->impl->wrapperView.window.screen.scale;
   }
 
+  // Before realization the wrapper has no window yet, but an embedded parent
+  // may already belong to an external screen with a different scale.
+  if (view && view->parent) {
+    UIView* const parent = (UIView*)view->parent;
+    if (parent.window.screen) {
+      return parent.window.screen.scale;
+    }
+  }
+
+  if (view && view->transientParent) {
+    UIView* const parent = (UIView*)view->transientParent;
+    if (parent.window.screen) {
+      return parent.window.screen.scale;
+    }
+  }
+
   if (view && view->world && view->world->impl && view->world->impl->screen) {
     return view->world->impl->screen.scale;
   }
@@ -382,10 +398,16 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
     return;
   }
 
-  NSData* const data = [NSData dataWithBytes:event length:sizeof(PuglEvent)];
+  NSData* const data =
+    [[NSData alloc] initWithBytes:event length:sizeof(PuglEvent)];
+  if (!data) {
+    return;
+  }
+
   [pendingEventLock lock];
   [pendingEvents addObject:data];
   [pendingEventLock unlock];
+  [data release];
 
   CFRunLoopWakeUp(CFRunLoopGetMain());
 }
