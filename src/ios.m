@@ -53,7 +53,7 @@ puglIosViewStyle(const PuglView* const view)
     return 0U;
   }
 
-  const PuglWrapperView* const wrapper = view->impl->wrapperView;
+  PuglWrapperView* const wrapper = view->impl->wrapperView;
   const bool hidden = wrapper.hidden ||
                       (view->impl->window && view->impl->window.hidden);
   return hidden ? PUGL_VIEW_STYLE_HIDDEN : PUGL_VIEW_STYLE_MAPPED;
@@ -698,9 +698,16 @@ puglRealize(PuglView* view)
     return status;
   }
 
+  // A realized view is initially hidden on every Pugl platform.  Publish that
+  // state in the first configuration so puglGetVisible() remains authoritative
+  // before the first puglShow().
+  wrapper.hidden = YES;
+  if (view->impl->window) {
+    view->impl->window.hidden = YES;
+  }
+
   status = [wrapper dispatchCurrentConfiguration];
   if (!status) {
-    wrapper.hidden = YES;
     [view->impl->drawView setNeedsDisplay];
   }
   return status;
@@ -846,7 +853,8 @@ puglSetViewStyle(PuglView* const view, const PuglViewStyleFlags flags)
 PuglStatus
 puglStartTimer(PuglView* view, const uintptr_t id, const double timeout)
 {
-  if (!view || !view->impl || !view->impl->wrapperView || timeout <= 0.0) {
+  if (!view || !view->impl || !view->impl->wrapperView ||
+      !isfinite(timeout) || timeout <= 0.0) {
     return PUGL_BAD_PARAMETER;
   }
 
@@ -1030,9 +1038,11 @@ puglSetWindowSize(PuglView* const view,
                   const unsigned width,
                   const unsigned height)
 {
-  if (!view || !view->impl || !view->impl->wrapperView ||
-      !puglIsValidSize(width, height)) {
+  if (!view || !view->impl || !view->impl->wrapperView) {
     return PUGL_FAILURE;
+  }
+  if (!puglIsValidSize(width, height)) {
+    return PUGL_BAD_PARAMETER;
   }
 
   const CGFloat scale = puglIosScale(view);
@@ -1089,9 +1099,14 @@ puglIosPrepareClipboard(PuglView* const view)
 PuglStatus
 puglPaste(PuglView* const view)
 {
-  if (!view || !view->impl || !puglIosPrepareClipboard(view)) {
+  if (!view || !view->impl) {
     return PUGL_FAILURE;
   }
+
+  // An empty clipboard is still a valid offer with zero advertised types.
+  // This matches the desktop contract and lets the client decide how to handle
+  // a paste request without treating normal empty state as a backend error.
+  (void)puglIosPrepareClipboard(view);
 
   const PuglDataOfferEvent offer = {
     PUGL_DATA_OFFER,
