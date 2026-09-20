@@ -392,16 +392,16 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
   puglDispatchEvent(puglview, &event);
 }
 
-- (void)queueEvent:(const PuglEvent*)event
+- (PuglStatus)queueEvent:(const PuglEvent*)event
 {
   if (!event) {
-    return;
+    return PUGL_BAD_PARAMETER;
   }
 
   NSData* const data =
     [[NSData alloc] initWithBytes:event length:sizeof(PuglEvent)];
   if (!data) {
-    return;
+    return PUGL_NO_MEMORY;
   }
 
   [pendingEventLock lock];
@@ -410,6 +410,7 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
   [data release];
 
   CFRunLoopWakeUp(CFRunLoopGetMain());
+  return PUGL_SUCCESS;
 }
 
 - (void)drainPendingEvents
@@ -882,6 +883,12 @@ puglRealize(PuglView* view)
     return status;
   }
 
+  // Modules are embedded guests and must never create or take ownership of a
+  // process-level UIWindow in a plug-in host.
+  if (view->world->type == PUGL_MODULE && !view->parent) {
+    return PUGL_BAD_CONFIGURATION;
+  }
+
   puglEnsureHint(view, PUGL_RED_BITS, 8);
   puglEnsureHint(view, PUGL_GREEN_BITS, 8);
   puglEnsureHint(view, PUGL_BLUE_BITS, 8);
@@ -900,6 +907,10 @@ puglRealize(PuglView* view)
     return PUGL_NO_MEMORY;
   }
 
+  // A realized Pugl view starts hidden.  Set this before attaching to an
+  // application-owned parent so an embedded view can never flash visible
+  // before its first explicit puglShow().
+  wrapper.hidden = YES;
   wrapper->puglview = view;
   view->impl->wrapperView = wrapper;
 
@@ -955,14 +966,6 @@ puglRealize(PuglView* view)
     return status;
   }
 
-  // A realized view is initially hidden on every Pugl platform.  Publish that
-  // state in the first configuration so puglGetVisible() remains authoritative
-  // before the first puglShow().
-  wrapper.hidden = YES;
-  if (view->impl->window) {
-    view->impl->window.hidden = YES;
-  }
-
   status = [wrapper dispatchCurrentConfiguration];
   if (!status) {
     [view->impl->drawView setNeedsDisplay];
@@ -970,30 +973,31 @@ puglRealize(PuglView* view)
   return status;
 }
 
-PuglStatus
-puglUnrealize(PuglView* const view)
+static void
+puglIosReleaseViewResources(PuglView* const view)
 {
-  if (!view || !view->impl || !view->impl->wrapperView) {
-    return PUGL_FAILURE;
+  if (!view || !view->impl) {
+    return;
   }
 
   PuglInternals* const impl = view->impl;
-  (void)[impl->wrapperView resignFirstResponder];
+  PuglWrapperView* const wrapper = impl->wrapperView;
 
-  PuglStatus status = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
-
-  // NSTimer retains its target and the run loop retains scheduled timers.
-  // Invalidate every per-view timer before clearing the PuglView back-pointer,
-  // otherwise a destroyed plug-in instance could leave a live timer targeting
-  // an orphaned wrapper and crash on its next tick.
-  puglIosInvalidateTimers(impl->wrapperView);
+  if (wrapper) {
+    // Disable all future native callbacks before responder/view teardown can
+    // synchronously call back into the client.
+    puglIosInvalidateTimers(wrapper);
+    wrapper->puglview = NULL;
+    (void)[wrapper resignFirstResponder];
+  }
 
   if (view->backend && impl->drawView) {
     view->backend->destroy(view);
   }
 
-  [impl->wrapperView removeFromSuperview];
-  impl->wrapperView->puglview = NULL;
+  if (wrapper) {
+    [wrapper removeFromSuperview];
+  }
 
   if (impl->window) {
     impl->window.hidden = YES;
@@ -1009,9 +1013,23 @@ puglUnrealize(PuglView* const view)
     impl->window = nil;
   }
 
-  [impl->wrapperView release];
-  impl->wrapperView = nil;
+  if (wrapper) {
+    [wrapper release];
+    impl->wrapperView = nil;
+  }
+
   memset(&view->lastConfigure, 0, sizeof(PuglConfigureEvent));
+}
+
+PuglStatus
+puglUnrealize(PuglView* const view)
+{
+  if (!view || !view->impl || !view->impl->wrapperView) {
+    return PUGL_FAILURE;
+  }
+
+  const PuglStatus status = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
+  puglIosReleaseViewResources(view);
   return status;
 }
 
@@ -1060,19 +1078,10 @@ puglFreeViewInternals(PuglView* view)
     return;
   }
 
-  if (view->impl->wrapperView) {
-    if (view->stage >= PUGL_VIEW_STAGE_REALIZED) {
-      (void)puglUnrealize(view);
-    } else {
-      if (view->backend && view->impl->drawView) {
-        view->backend->destroy(view);
-      }
-      view->impl->wrapperView->puglview = NULL;
-      [view->impl->wrapperView removeFromSuperview];
-      [view->impl->wrapperView release];
-      view->impl->wrapperView = nil;
-    }
-  }
+  // puglFreeView() is destructor-driven teardown.  Keep it callback-silent:
+  // common state such as view strings has already begun destruction before
+  // this platform hook runs.
+  puglIosReleaseViewResources(view);
 
   [view->impl->clipboardData release];
   [view->impl->clipboardType release];
@@ -1164,18 +1173,18 @@ puglSendEvent(PuglView* view, const PuglEvent* event)
     return PUGL_UNSUPPORTED;
   }
 
-  [view->impl->wrapperView queueEvent:event];
-  return PUGL_SUCCESS;
+  return [view->impl->wrapperView queueEvent:event];
 }
 
 PuglStatus
 puglUpdate(PuglWorld* world, const double timeout)
 {
-  if (!world || world->state != PUGL_WORLD_IDLE) {
-    return PUGL_BAD_CALL;
-  }
+  @autoreleasepool {
+    if (!world || world->state != PUGL_WORLD_IDLE) {
+      return PUGL_BAD_CALL;
+    }
 
-  world->state = PUGL_WORLD_UPDATING;
+    world->state = PUGL_WORLD_UPDATING;
 
   if (world->type == PUGL_PROGRAM && timeout != 0.0) {
     NSDate* const limit =
@@ -1214,8 +1223,9 @@ puglUpdate(PuglWorld* world, const double timeout)
     }
   }
 
-  world->state = PUGL_WORLD_IDLE;
-  return PUGL_SUCCESS;
+    world->state = PUGL_WORLD_IDLE;
+    return PUGL_SUCCESS;
+  }
 }
 
 double
