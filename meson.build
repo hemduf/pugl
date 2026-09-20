@@ -174,8 +174,13 @@ if is_ios
   core_deps = [framework_deps]
   backend_extension = '.m'
   soversion = ''
+  ios_objc_class_prefix = get_option('ios_objc_class_prefix')
+  if ios_objc_class_prefix == ''
+    error('ios_objc_class_prefix must be set to a consumer-unique Objective-C class prefix for iOS')
+  endif
+
   platform_args = [
-    '-DPUGL_OBJC_CLASS_PREFIX=' + get_option('ios_objc_class_prefix'),
+    '-DPUGL_OBJC_CLASS_PREFIX=' + ios_objc_class_prefix,
     '-Wno-deprecated-declarations',
   ]
 
