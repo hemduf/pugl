@@ -19,7 +19,7 @@
    identifier (for example, MyPluginPugl) to avoid runtime class collisions.
 */
 #ifndef PUGL_OBJC_CLASS_PREFIX
-#  define PUGL_OBJC_CLASS_PREFIX PuglIos
+#  error "PUGL_OBJC_CLASS_PREFIX must be a consumer-unique Objective-C class prefix"
 #endif
 
 #define PUGL_OBJC_JOIN_INNER(a, b) a##b
@@ -41,7 +41,7 @@
 
 - (void)dispatchExpose:(CGRect)rect;
 - (PuglStatus)dispatchCurrentConfiguration;
-- (void)queueEvent:(const PuglEvent*)event;
+- (PuglStatus)queueEvent:(const PuglEvent*)event;
 - (void)drainPendingEvents;
 
 @end
