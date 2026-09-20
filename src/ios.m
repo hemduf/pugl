@@ -485,6 +485,66 @@ puglIosPointerPressure(UITouch* const touch)
   return fmax(0.0, fmin(1.0, (double)(touch.force / maximum)));
 }
 
+static bool
+puglIosIsMouseTouch(UITouch* const touch)
+{
+  return touch.type == UITouchTypeIndirect ||
+         touch.type == UITouchTypeIndirectPointer;
+}
+
+- (void)dispatchLegacyPointerType:(PuglEventType)type touch:(UITouch*)touch
+{
+  if (!puglview || !touch) {
+    return;
+  }
+
+  const CGFloat scale = puglIosScale(puglview);
+  const CGPoint local = [touch locationInView:self];
+  const CGPoint root = [touch locationInView:nil];
+
+  PuglEvent event;
+  memset(&event, 0, sizeof(event));
+
+  if (type == PUGL_BUTTON_PRESS || type == PUGL_BUTTON_RELEASE) {
+    event.button = (PuglButtonEvent){
+      type,
+      0U,
+      touch.timestamp,
+      local.x * scale,
+      local.y * scale,
+      root.x * scale,
+      root.y * scale,
+      0U,
+      0U,
+    };
+  } else if (type == PUGL_MOTION) {
+    event.motion = (PuglMotionEvent){
+      PUGL_MOTION,
+      0U,
+      touch.timestamp,
+      local.x * scale,
+      local.y * scale,
+      root.x * scale,
+      root.y * scale,
+      0U,
+    };
+  } else {
+    event.crossing = (PuglCrossingEvent){
+      type,
+      0U,
+      touch.timestamp,
+      local.x * scale,
+      local.y * scale,
+      root.x * scale,
+      root.y * scale,
+      0U,
+      PUGL_CROSSING_NORMAL,
+    };
+  }
+
+  puglDispatchEvent(puglview, &event);
+}
+
 - (PuglPointerId)pointerIdForTouch:(UITouch*)touch create:(BOOL)create
 {
   if (!touch) {
@@ -570,6 +630,14 @@ puglIosPointerPressure(UITouch* const touch)
       break;
     }
 
+    if (puglIosIsMouseTouch(touch)) {
+      [protectedSelf dispatchLegacyPointerType:PUGL_POINTER_IN touch:touch];
+      if (protectedSelf->puglview) {
+        [protectedSelf dispatchLegacyPointerType:PUGL_BUTTON_PRESS touch:touch];
+      }
+      continue;
+    }
+
     const PuglPointerId pointerId =
       [protectedSelf pointerIdForTouch:touch create:YES];
     [protectedSelf dispatchPointerType:PUGL_POINTER_DOWN
@@ -588,6 +656,11 @@ puglIosPointerPressure(UITouch* const touch)
   for (UITouch* const touch in touches) {
     if (!protectedSelf->puglview) {
       break;
+    }
+
+    if (puglIosIsMouseTouch(touch)) {
+      [protectedSelf dispatchLegacyPointerType:PUGL_MOTION touch:touch];
+      continue;
     }
 
     const PuglPointerId pointerId =
@@ -629,6 +702,14 @@ puglIosPointerPressure(UITouch* const touch)
   for (UITouch* const touch in touches) {
     if (!protectedSelf->puglview) {
       break;
+    }
+
+    if (puglIosIsMouseTouch(touch)) {
+      [protectedSelf dispatchLegacyPointerType:PUGL_BUTTON_RELEASE touch:touch];
+      if (protectedSelf->puglview) {
+        [protectedSelf dispatchLegacyPointerType:PUGL_POINTER_OUT touch:touch];
+      }
+      continue;
     }
 
     const PuglPointerId pointerId =
