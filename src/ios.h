@@ -15,7 +15,7 @@
 /*
    Objective-C class names are process-global, even when Pugl is statically
    linked into a plug-in bundle.  Consumers that may coexist with another
-   embedded copy of Pugl can define PUGL_OBJC_CLASS_PREFIX to a product-unique
+   embedded copy of Pugl must define PUGL_OBJC_CLASS_PREFIX to a consumer-unique
    identifier (for example, MyPluginPugl) to avoid runtime class collisions.
 */
 #ifndef PUGL_OBJC_CLASS_PREFIX
