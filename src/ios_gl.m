@@ -361,11 +361,17 @@ puglIosGlDestroy(PuglView* view)
 static PuglStatus
 puglIosGlEnter(PuglView* view, const PuglExposeEvent* expose)
 {
-  (void)expose;
-
   PuglOpenGLView* const drawView = (PuglOpenGLView*)view->impl->drawView;
   if (!drawView || ![drawView pushContext]) {
     return PUGL_FAILURE;
+  }
+
+  // REALIZE/UNREALIZE only require a current context.  An embedded plug-in
+  // view may legitimately be realized before the host attaches its UIView to
+  // a window, in which case CAEAGLLayer has no drawable yet.  Defer framebuffer
+  // creation until an actual expose.
+  if (!expose) {
+    return PUGL_SUCCESS;
   }
 
   UIScreen* const screen = drawView.window.screen;
