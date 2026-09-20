@@ -2,9 +2,9 @@ Pugl
 ====
 
 Pugl (PlUgin Graphics Library) is a minimal portability layer for GUIs which is
-suitable for use in plugins and applications.  It works on X11, MacOS, iOS/iPadOS, Windows, and WebAssembly/Emscripten, and
-includes optional support for drawing with Vulkan, OpenGL/OpenGL ES/WebGL, and
-Cairo where available.
+suitable for use in plugins and applications.  It works on X11, MacOS,
+iOS/iPadOS, Windows, and WebAssembly/Emscripten, and includes optional support
+for drawing with Vulkan, OpenGL/OpenGL ES/WebGL, and Cairo where available.
 
 Pugl is vaguely similar to libraries like GLUT and GLFW, but has different
 goals and priorities:
@@ -50,6 +50,11 @@ a lightweight `UIWindow`, but scene-managed applications and app extensions
 should embed a Pugl view in an application-owned `UIView`.
 
 iOS 14 or newer is the supported deployment baseline.
+
+Objective-C class names are process-global.  Plug-ins that statically embed
+Pugl and may coexist with another embedded copy can define
+`PUGL_OBJC_CLASS_PREFIX` to a product-unique Objective-C identifier at build
+time.
 
 WebAssembly
 -----------

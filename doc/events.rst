@@ -81,3 +81,20 @@ Vulkan Context
 With Vulkan, the graphics context is managed by the application rather than Pugl.
 However, drawing must still only be performed during an expose.
 
+
+
+Raw Pointer Contacts
+====================
+
+Touch and pen input is represented by :struct:`PuglPointerEvent`.
+Each active contact has a non-zero :type:`PuglPointerId` that remains stable
+from :enumerator:`PUGL_POINTER_DOWN <PuglEventType.PUGL_POINTER_DOWN>` until
+:enumerator:`PUGL_POINTER_UP <PuglEventType.PUGL_POINTER_UP>` or
+:enumerator:`PUGL_POINTER_CANCEL <PuglEventType.PUGL_POINTER_CANCEL>`.
+
+Backends send one event per changed contact, so no allocation is required to
+represent multi-pointer input.  Gesture interpretation such as tap, drag,
+pinch, or rotation is intentionally left to higher-level toolkits.
+
+A cancelled contact must not be treated as a normal release.  Applications
+should discard any transient interaction state associated with that pointer ID.

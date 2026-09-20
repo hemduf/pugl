@@ -476,6 +476,9 @@ typedef enum {
 */
 typedef uint32_t PuglPointerId;
 
+/// Sentinel value that never identifies an active pointer contact
+#define PUGL_POINTER_ID_NONE ((PuglPointerId)0U)
+
 /// Physical source of a #PuglPointerEvent
 typedef enum {
   PUGL_POINTER_UNKNOWN, ///< Unknown or unsupported pointer source

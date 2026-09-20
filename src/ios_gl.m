@@ -283,14 +283,33 @@ puglIosGlConfigure(PuglView* view)
   if (view->hints[PUGL_CONTEXT_VERSION_MAJOR] < 2) {
     view->hints[PUGL_CONTEXT_VERSION_MAJOR] = 2;
   }
-  if (view->hints[PUGL_CONTEXT_VERSION_MAJOR] > 3) {
+  if (view->hints[PUGL_CONTEXT_VERSION_MAJOR] > 3 ||
+      view->hints[PUGL_CONTEXT_VERSION_MINOR] != 0) {
     return PUGL_BAD_CONFIGURATION;
   }
 
-  if (view->hints[PUGL_SAMPLES] > 0 ||
+  if (view->hints[PUGL_CONTEXT_DEBUG] ||
+      view->hints[PUGL_DOUBLE_BUFFER] != 1 ||
+      view->hints[PUGL_SWAP_INTERVAL] != 1 ||
+      view->hints[PUGL_SAMPLES] > 0 ||
       view->hints[PUGL_SAMPLE_BUFFERS] > 0) {
     return PUGL_UNSUPPORTED;
   }
+
+  // EAGL exposes fixed drawable formats.  Publish the actual values rather
+  // than leaving requested hints that the backend cannot satisfy.
+  const bool needDepth = view->hints[PUGL_DEPTH_BITS] > 0;
+  const bool needStencil = view->hints[PUGL_STENCIL_BITS] > 0;
+  view->hints[PUGL_RED_BITS] = 8;
+  view->hints[PUGL_GREEN_BITS] = 8;
+  view->hints[PUGL_BLUE_BITS] = 8;
+  view->hints[PUGL_ALPHA_BITS] = 8;
+  view->hints[PUGL_DEPTH_BITS] = needDepth ? (needStencil ? 24 : 16) : 0;
+  view->hints[PUGL_STENCIL_BITS] = needStencil ? 8 : 0;
+  view->hints[PUGL_SAMPLES] = 0;
+  view->hints[PUGL_SAMPLE_BUFFERS] = 0;
+  view->hints[PUGL_DOUBLE_BUFFER] = 1;
+  view->hints[PUGL_SWAP_INTERVAL] = 1;
 
   return PUGL_SUCCESS;
 }

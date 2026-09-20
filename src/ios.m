@@ -179,7 +179,8 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
                     const UIKey* const      key,
                     const PuglMods          state)
 {
-  if (!wrapper || !key || !key.characters.length ||
+  if (!wrapper || !wrapper->puglview || !key ||
+      !key.characters.length ||
       (state & (PUGL_MOD_CTRL | PUGL_MOD_SUPER))) {
     return;
   }
@@ -386,24 +387,40 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
 
 - (void)drainPendingEvents
 {
+  // A client event handler is allowed to tear down application state.  Keep
+  // the native wrapper alive until this drain finishes and stop dispatching as
+  // soon as the Pugl view has been detached.
+  PuglWrapperView* const protectedSelf = [self retain];
+
   [pendingEventLock lock];
   NSArray* const events = [pendingEvents copy];
   [pendingEvents removeAllObjects];
   [pendingEventLock unlock];
 
   for (NSData* const data in events) {
+    PuglView* const view = protectedSelf->puglview;
+    if (!view) {
+      break;
+    }
+
     if (data.length == sizeof(PuglEvent)) {
       PuglEvent event;
       memcpy(&event, data.bytes, sizeof(event));
-      puglDispatchEvent(puglview, &event);
+      puglDispatchEvent(view, &event);
     }
   }
 
   [events release];
+  [protectedSelf release];
 }
 
 - (void)timerTick:(NSTimer*)timer
 {
+  if (!puglview) {
+    [timer invalidate];
+    return;
+  }
+
   const uintptr_t timerId =
     (uintptr_t)[(NSNumber*)timer.userInfo unsignedLongLongValue];
   const PuglTimerEvent timerEvent = {PUGL_TIMER, 0U, timerId};
@@ -519,63 +536,93 @@ puglIosPointerPressure(UITouch* const touch)
 - (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
   (void)event;
+  PuglWrapperView* const protectedSelf = [self retain];
 
   for (UITouch* const touch in touches) {
-    const PuglPointerId pointerId = [self pointerIdForTouch:touch create:YES];
-    [self dispatchPointerType:PUGL_POINTER_DOWN
-                        touch:touch
-                    pointerId:pointerId
-                  sampleFlags:0U];
+    if (!protectedSelf->puglview) {
+      break;
+    }
+
+    const PuglPointerId pointerId =
+      [protectedSelf pointerIdForTouch:touch create:YES];
+    [protectedSelf dispatchPointerType:PUGL_POINTER_DOWN
+                                 touch:touch
+                             pointerId:pointerId
+                           sampleFlags:0U];
   }
+
+  [protectedSelf release];
 }
 
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
+  PuglWrapperView* const protectedSelf = [self retain];
+
   for (UITouch* const touch in touches) {
-    const PuglPointerId pointerId = [self pointerIdForTouch:touch create:NO];
+    if (!protectedSelf->puglview) {
+      break;
+    }
+
+    const PuglPointerId pointerId =
+      [protectedSelf pointerIdForTouch:touch create:NO];
     if (!pointerId) {
       continue;
     }
 
     NSArray<UITouch*>* const samples = [event coalescedTouchesForTouch:touch];
     if (!samples.count) {
-      [self dispatchPointerType:PUGL_POINTER_MOVE
-                          touch:touch
-                      pointerId:pointerId
-                    sampleFlags:0U];
+      [protectedSelf dispatchPointerType:PUGL_POINTER_MOVE
+                                   touch:touch
+                               pointerId:pointerId
+                             sampleFlags:0U];
       continue;
     }
 
     for (NSUInteger i = 0U; i < samples.count; ++i) {
+      if (!protectedSelf->puglview) {
+        break;
+      }
+
       const PuglPointerFlags flags =
         i + 1U < samples.count ? PUGL_POINTER_IS_COALESCED : 0U;
-      [self dispatchPointerType:PUGL_POINTER_MOVE
-                          touch:[samples objectAtIndex:i]
-                      pointerId:pointerId
-                    sampleFlags:flags];
+      [protectedSelf dispatchPointerType:PUGL_POINTER_MOVE
+                                   touch:[samples objectAtIndex:i]
+                               pointerId:pointerId
+                             sampleFlags:flags];
     }
   }
+
+  [protectedSelf release];
 }
 
 - (void)finishTouches:(NSSet<UITouch*>*)touches type:(PuglEventType)type
 {
+  PuglWrapperView* const protectedSelf = [self retain];
+
   for (UITouch* const touch in touches) {
-    const PuglPointerId pointerId = [self pointerIdForTouch:touch create:NO];
+    if (!protectedSelf->puglview) {
+      break;
+    }
+
+    const PuglPointerId pointerId =
+      [protectedSelf pointerIdForTouch:touch create:NO];
     if (!pointerId) {
       continue;
     }
 
-    [self dispatchPointerType:type
-                        touch:touch
-                    pointerId:pointerId
-                  sampleFlags:0U];
+    [protectedSelf dispatchPointerType:type
+                                 touch:touch
+                             pointerId:pointerId
+                           sampleFlags:0U];
 
     NSValue* const key = [NSValue valueWithNonretainedObject:touch];
-    [activeTouches removeObjectForKey:key];
-    if (primaryPointerId == pointerId) {
-      primaryPointerId = 0U;
+    [protectedSelf->activeTouches removeObjectForKey:key];
+    if (protectedSelf->primaryPointerId == pointerId) {
+      protectedSelf->primaryPointerId = 0U;
     }
   }
+
+  [protectedSelf release];
 }
 
 - (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
@@ -592,7 +639,14 @@ puglIosPointerPressure(UITouch* const touch)
 
 - (void)dispatchPresses:(NSSet<UIPress*>*)presses type:(PuglEventType)type
 {
+  PuglWrapperView* const protectedSelf = [self retain];
+
   for (UIPress* const press in presses) {
+    PuglView* const view = protectedSelf->puglview;
+    if (!view) {
+      break;
+    }
+
     UIKey* const key = press.key;
     if (!key) {
       continue;
@@ -602,7 +656,7 @@ puglIosPointerPressure(UITouch* const touch)
     const PuglKeyEvent keyEvent = {
       type,
       0U,
-      puglGetTime(puglview->world),
+      puglGetTime(view->world),
       0.0,
       0.0,
       0.0,
@@ -615,12 +669,14 @@ puglIosPointerPressure(UITouch* const touch)
     PuglEvent event;
     memset(&event, 0, sizeof(event));
     event.key = keyEvent;
-    puglDispatchEvent(puglview, &event);
+    puglDispatchEvent(view, &event);
 
-    if (type == PUGL_KEY_PRESS) {
-      puglIosDispatchText(self, key, state);
+    if (type == PUGL_KEY_PRESS && protectedSelf->puglview == view) {
+      puglIosDispatchText(protectedSelf, key, state);
     }
   }
+
+  [protectedSelf release];
 }
 
 - (void)pressesBegan:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event
