@@ -162,6 +162,7 @@ puglIosKey(const UIKey* const key)
   case 0x2AU: return PUGL_KEY_BACKSPACE;
   case 0x2BU: return PUGL_KEY_TAB;
   case 0x2CU: return PUGL_KEY_SPACE;
+  case 0x39U: return PUGL_KEY_CAPS_LOCK;
   case 0x3AU: return PUGL_KEY_F1;
   case 0x3BU: return PUGL_KEY_F2;
   case 0x3CU: return PUGL_KEY_F3;
@@ -174,6 +175,9 @@ puglIosKey(const UIKey* const key)
   case 0x43U: return PUGL_KEY_F10;
   case 0x44U: return PUGL_KEY_F11;
   case 0x45U: return PUGL_KEY_F12;
+  case 0x46U: return PUGL_KEY_PRINT_SCREEN;
+  case 0x47U: return PUGL_KEY_SCROLL_LOCK;
+  case 0x48U: return PUGL_KEY_PAUSE;
   case 0x49U: return PUGL_KEY_INSERT;
   case 0x4AU: return PUGL_KEY_HOME;
   case 0x4BU: return PUGL_KEY_PAGE_UP;
@@ -184,6 +188,16 @@ puglIosKey(const UIKey* const key)
   case 0x50U: return PUGL_KEY_LEFT;
   case 0x51U: return PUGL_KEY_DOWN;
   case 0x52U: return PUGL_KEY_UP;
+  case 0x53U: return PUGL_KEY_NUM_LOCK;
+  case 0x65U: return PUGL_KEY_MENU;
+  case 0xE0U: return PUGL_KEY_CTRL_L;
+  case 0xE1U: return PUGL_KEY_SHIFT_L;
+  case 0xE2U: return PUGL_KEY_ALT_L;
+  case 0xE3U: return PUGL_KEY_SUPER_L;
+  case 0xE4U: return PUGL_KEY_CTRL_R;
+  case 0xE5U: return PUGL_KEY_SHIFT_R;
+  case 0xE6U: return PUGL_KEY_ALT_R;
+  case 0xE7U: return PUGL_KEY_SUPER_R;
   default: break;
   }
 
