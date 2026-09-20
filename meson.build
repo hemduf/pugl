@@ -174,7 +174,10 @@ if is_ios
   core_deps = [framework_deps]
   backend_extension = '.m'
   soversion = ''
-  platform_args = ['-Wno-deprecated-declarations']
+  platform_args = [
+    '-DPUGL_OBJC_CLASS_PREFIX=' + get_option('ios_objc_class_prefix'),
+    '-Wno-deprecated-declarations',
+  ]
 
 elif host_machine.system() == 'darwin'
   # MacOS
