@@ -29,8 +29,11 @@ versioned_name = 'pugl' + version_suffix
 pkg = import('pkgconfig')
 cc = meson.get_compiler('c')
 
-# Enable Objective C support if we're building for MacOS
-if host_machine.system() == 'darwin'
+# Enable Objective-C for Apple platforms.  iOS cross builds use a Meson
+# external property because host_machine.system() is still "darwin".
+pugl_platform_override = meson.get_external_property('pugl_platform', '')
+is_ios = pugl_platform_override == 'ios'
+if host_machine.system() == 'darwin' or is_ios
   add_languages(['objc'], native: false)
   objcc = meson.get_compiler('objc')
 endif
@@ -157,7 +160,23 @@ m_dep = cc.find_library('m', required: false)
 
 platform_link_args = []
 
-if host_machine.system() == 'darwin'
+if is_ios
+  # iOS / iPadOS.  Pugl is normally embedded in a host-provided UIView, which
+  # also makes this path usable by app extensions and AUv3-style hosts.
+  framework_deps = dependency(
+    'appleframeworks',
+    modules: ['Foundation', 'QuartzCore', 'UIKit'],
+    required: true,
+  )
+
+  platform = 'ios'
+  platform_sources = files('src/ios.m')
+  core_deps = [framework_deps]
+  backend_extension = '.m'
+  soversion = ''
+  platform_args = ['-Wno-deprecated-declarations']
+
+elif host_machine.system() == 'darwin'
   # MacOS
 
   framework_deps = dependency(
@@ -425,6 +444,16 @@ if platform == 'emscripten'
     opengl_dep = declare_dependency()
     gl_link_args = ['-sMAX_WEBGL_VERSION=2']
   endif
+elif platform == 'ios'
+  if get_option('opengl').disabled()
+    opengl_dep = dependency('', required: false)
+  else
+    opengl_dep = dependency(
+      'appleframeworks',
+      modules: ['OpenGLES', 'QuartzCore'],
+      required: true,
+    )
+  endif
 else
   opengl_dep = dependency(
     'GL',
@@ -472,7 +501,10 @@ endif
 
 # Cairo Backend #
 
-if platform == 'emscripten'
+if platform == 'emscripten' or platform == 'ios'
+  if platform == 'ios' and get_option('cairo').enabled()
+    error('The Cairo backend is not supported on iOS')
+  endif
   cairo_dep = dependency('', required: false)
 else
   cairo_dep = dependency(
@@ -540,7 +572,10 @@ if cairo_dep.found()
 endif
 
 # Vulkan
-if platform == 'emscripten'
+if platform == 'emscripten' or platform == 'ios'
+  if platform == 'ios' and get_option('vulkan').enabled()
+    error('The Vulkan backend is not supported on iOS')
+  endif
   vulkan_dep = dependency('', required: false)
 else
   vulkan_dep = dependency(

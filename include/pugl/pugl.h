@@ -828,6 +828,8 @@ puglGetWorldHandle(PuglWorld* world);
 
    MacOS: Returns a pointer to the `NSApplication`.
 
+   iOS: Returns a pointer to the `UIScreen` used by the world.
+
    Windows: Returns the `HMODULE` of the calling process.
 */
 PUGL_API void*
@@ -927,6 +929,8 @@ typedef struct PuglViewImpl PuglView;
    X11: This is a `Window`.
 
    MacOS: This is a pointer to an `NSView*`.
+
+   iOS: This is a pointer to a `UIView*`.
 
    Windows: This is a `HWND`.
 */
