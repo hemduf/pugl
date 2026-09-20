@@ -52,9 +52,10 @@ should embed a Pugl view in an application-owned `UIView`.
 iOS 14 or newer is the supported deployment baseline.
 
 Objective-C class names are process-global.  Plug-ins that statically embed
-Pugl and may coexist with another embedded copy can define
-`PUGL_OBJC_CLASS_PREFIX` to a product-unique Objective-C identifier at build
-time.
+Pugl and may coexist with another embedded copy should use a product-unique
+class prefix.  Meson builds can set `-Dios_objc_class_prefix=MyPluginPugl`;
+other build systems can define `PUGL_OBJC_CLASS_PREFIX` while compiling the
+iOS backend.
 
 WebAssembly
 -----------
