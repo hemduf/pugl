@@ -248,6 +248,9 @@ puglIosGlEnsureHint(PuglView* const view,
 {
   [super layoutSubviews];
 
+  UIScreen* const screen = self.window.screen;
+  self.contentScaleFactor = screen ? screen.scale : [UIScreen mainScreen].scale;
+
   if ([EAGLContext currentContext] == context) {
     (void)[self resizeDrawable];
   }
@@ -364,6 +367,10 @@ puglIosGlEnter(PuglView* view, const PuglExposeEvent* expose)
   if (!drawView || ![drawView pushContext]) {
     return PUGL_FAILURE;
   }
+
+  UIScreen* const screen = drawView.window.screen;
+  drawView.contentScaleFactor =
+    screen ? screen.scale : [UIScreen mainScreen].scale;
 
   if (![drawView resizeDrawable]) {
     (void)[drawView popContext];
