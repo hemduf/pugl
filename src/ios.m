@@ -1087,8 +1087,12 @@ puglIosPrepareClipboard(PuglView* const view)
 
   if (pasteboard.string) {
     type = @"text/plain";
-  } else if (pasteboard.types.count) {
-    type = [pasteboard.types objectAtIndex:0U];
+  } else if (pasteboard.items.count) {
+    NSDictionary* const firstItem = [pasteboard.items objectAtIndex:0U];
+    NSArray* const types = [firstItem allKeys];
+    if (types.count) {
+      type = [types objectAtIndex:0U];
+    }
   }
 
   [view->impl->clipboardType release];
