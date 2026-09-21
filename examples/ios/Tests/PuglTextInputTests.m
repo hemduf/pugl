@@ -18,7 +18,30 @@ typedef struct {
   uint32_t lastKeycode;
   uint32_t lastCharacter;
   PuglMods lastState;
+  bool unrealizeOnText;
+  bool freeOnText;
 } PuglIOSTestState;
+
+@interface PuglIOSTestFaultTextInputView : PuglTextInputView {
+@public
+  BOOL refuseBecome;
+  BOOL refuseResign;
+}
+@end
+
+@implementation PuglIOSTestFaultTextInputView
+
+- (BOOL)becomeFirstResponder
+{
+  return refuseBecome ? NO : [super becomeFirstResponder];
+}
+
+- (BOOL)resignFirstResponder
+{
+  return refuseResign ? NO : [super resignFirstResponder];
+}
+
+@end
 
 static PuglStatus
 puglIosTestEvent(PuglView* const view, const PuglEvent* const event)
@@ -40,6 +63,13 @@ puglIosTestEvent(PuglView* const view, const PuglEvent* const event)
     state->lastKeycode = event->text.keycode;
     state->lastCharacter = event->text.character;
     state->lastState = event->text.state;
+    if (state->unrealizeOnText) {
+      state->unrealizeOnText = false;
+      (void)puglUnrealize(view);
+    } else if (state->freeOnText) {
+      state->freeOnText = false;
+      puglFreeView(view);
+    }
     break;
   case PUGL_TEXT_EDIT:
     ++state->edit;
@@ -75,6 +105,27 @@ puglIosMakeTestView(PuglWorld* const        world,
   }
 
   return view;
+}
+
+static PuglIOSTestFaultTextInputView*
+puglIosInstallFaultTextInput(PuglView* const view)
+{
+  PuglTextInputView* const oldTextInput = view->impl->textInputView;
+  PuglIOSTestFaultTextInputView* const textInput =
+    [[PuglIOSTestFaultTextInputView alloc] initWithFrame:CGRectZero];
+  if (!textInput) {
+    return nil;
+  }
+
+  textInput->puglview = view;
+  textInput.backgroundColor = [UIColor clearColor];
+  [view->impl->wrapperView addSubview:textInput];
+
+  oldTextInput->puglview = NULL;
+  [oldTextInput removeFromSuperview];
+  [oldTextInput release];
+  view->impl->textInputView = textInput;
+  return textInput;
 }
 
 static UIWindow*
@@ -180,6 +231,94 @@ puglIosReleaseTestWindow(UIWindow* const window,
   const unsigned focusOutBeforeFree = stateB.focusOut;
   puglFreeView(viewB);
   XCTAssertEqual(stateB.focusOut, focusOutBeforeFree);
+
+  puglFreeWorld(world);
+  puglIosReleaseTestWindow(window, controller);
+}
+
+- (void)testResponderFailuresRemainTruthful
+{
+  UIViewController* controller = nil;
+  UIWindow* const window = puglIosMakeTestWindow(&controller);
+  PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
+  XCTAssertNotEqual(world, NULL);
+
+  PuglIOSTestState state = {0U};
+  PuglView* const view = puglIosMakeTestView(world, controller.view, &state);
+  XCTAssertNotEqual(view, NULL);
+
+  PuglIOSTestFaultTextInputView* const textInput =
+    puglIosInstallFaultTextInput(view);
+  XCTAssertNotEqual(textInput, nil);
+
+  XCTAssertEqual(puglGrabFocus(view), PUGL_SUCCESS);
+  textInput->refuseBecome = YES;
+  XCTAssertEqual(puglStartTextInput(view), PUGL_FAILURE);
+  XCTAssertFalse(puglIsTextInputActive(view));
+  XCTAssertTrue(puglHasFocus(view));
+  XCTAssertEqual(state.focusOut, 0U);
+
+  textInput->refuseBecome = NO;
+  XCTAssertEqual(puglStartTextInput(view), PUGL_SUCCESS);
+  XCTAssertTrue(puglIsTextInputActive(view));
+
+  textInput->refuseResign = YES;
+  XCTAssertEqual(puglStopTextInput(view), PUGL_FAILURE);
+  XCTAssertTrue(puglIsTextInputActive(view));
+  XCTAssertTrue(puglHasFocus(view));
+  XCTAssertEqual(state.focusOut, 0U);
+
+  textInput->refuseResign = NO;
+  XCTAssertEqual(puglStopTextInput(view), PUGL_SUCCESS);
+  XCTAssertFalse(puglIsTextInputActive(view));
+  XCTAssertTrue(puglHasFocus(view));
+
+  puglFreeView(view);
+  puglFreeWorld(world);
+  puglIosReleaseTestWindow(window, controller);
+}
+
+- (void)testTextCallbackCanUnrealizeOwner
+{
+  UIViewController* controller = nil;
+  UIWindow* const window = puglIosMakeTestWindow(&controller);
+  PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
+  XCTAssertNotEqual(world, NULL);
+
+  PuglIOSTestState state = {0U};
+  state.unrealizeOnText = true;
+  PuglView* const view = puglIosMakeTestView(world, controller.view, &state);
+  XCTAssertNotEqual(view, NULL);
+
+  XCTAssertEqual(puglGrabFocus(view), PUGL_SUCCESS);
+  XCTAssertEqual(puglStartTextInput(view), PUGL_SUCCESS);
+  [view->impl->textInputView insertText:@"AB"];
+
+  XCTAssertEqual(state.text, 1U);
+  XCTAssertFalse(puglIsTextInputActive(view));
+  XCTAssertEqual(puglShow(view, PUGL_SHOW_PASSIVE), PUGL_SUCCESS);
+
+  puglFreeView(view);
+  puglFreeWorld(world);
+  puglIosReleaseTestWindow(window, controller);
+}
+
+- (void)testTextCallbackCanFreeOwner
+{
+  UIViewController* controller = nil;
+  UIWindow* const window = puglIosMakeTestWindow(&controller);
+  PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
+  XCTAssertNotEqual(world, NULL);
+
+  PuglIOSTestState state = {0U};
+  state.freeOnText = true;
+  PuglView* const view = puglIosMakeTestView(world, controller.view, &state);
+  XCTAssertNotEqual(view, NULL);
+
+  XCTAssertEqual(puglGrabFocus(view), PUGL_SUCCESS);
+  XCTAssertEqual(puglStartTextInput(view), PUGL_SUCCESS);
+  [view->impl->textInputView insertText:@"AB"];
+  XCTAssertEqual(state.text, 1U);
 
   puglFreeWorld(world);
   puglIosReleaseTestWindow(window, controller);
