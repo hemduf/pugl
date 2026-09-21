@@ -13,10 +13,13 @@
 typedef struct {
   unsigned focusIn;
   unsigned focusOut;
+  unsigned keyPress;
+  unsigned keyRelease;
   unsigned text;
   unsigned edit;
   uint32_t lastKeycode;
   uint32_t lastCharacter;
+  uint32_t lastHardwareKeycode;
   PuglMods lastState;
   bool unrealizeOnText;
   bool freeOnText;
@@ -43,6 +46,75 @@ typedef struct {
 
 @end
 
+@interface PuglIOSTestKey : NSObject
+@end
+
+@implementation PuglIOSTestKey
+
+- (UIKeyboardHIDUsage)keyCode
+{
+  return (UIKeyboardHIDUsage)0x04U;
+}
+
+- (UIKeyModifierFlags)modifierFlags
+{
+  return 0U;
+}
+
+- (NSString*)characters
+{
+  return @"a";
+}
+
+- (NSString*)charactersIgnoringModifiers
+{
+  return @"a";
+}
+
+@end
+
+@interface PuglIOSTestPress : NSObject {
+@private
+  PuglIOSTestKey* testKey;
+}
+
+- (id)initWithKey:(PuglIOSTestKey*)key;
+- (UIKey*)key;
+
+@end
+
+@implementation PuglIOSTestPress
+
+- (id)initWithKey:(PuglIOSTestKey*)key
+{
+  self = [super init];
+  if (self) {
+    testKey = [key retain];
+  }
+  return self;
+}
+
+- (void)dealloc
+{
+  [testKey release];
+  [super dealloc];
+}
+
+- (UIKey*)key
+{
+  return (UIKey*)testKey;
+}
+
+@end
+
+@interface PuglWrapperView (PuglIOSTestPressDispatch)
+- (void)dispatchPresses:(NSSet<UIPress*>*)presses type:(PuglEventType)type;
+@end
+
+@interface PuglTextInputView (PuglIOSTestPressDispatch)
+- (void)dispatchPresses:(NSSet<UIPress*>*)presses type:(PuglEventType)type;
+@end
+
 static PuglStatus
 puglIosTestEvent(PuglView* const view, const PuglEvent* const event)
 {
@@ -57,6 +129,14 @@ puglIosTestEvent(PuglView* const view, const PuglEvent* const event)
     break;
   case PUGL_FOCUS_OUT:
     ++state->focusOut;
+    break;
+  case PUGL_KEY_PRESS:
+    ++state->keyPress;
+    state->lastHardwareKeycode = event->key.keycode;
+    break;
+  case PUGL_KEY_RELEASE:
+    ++state->keyRelease;
+    state->lastHardwareKeycode = event->key.keycode;
     break;
   case PUGL_TEXT:
     ++state->text;
@@ -236,6 +316,57 @@ puglIosReleaseTestWindow(UIWindow* const window,
   puglIosReleaseTestWindow(window, controller);
 }
 
+- (void)testHardwarePathDoesNotDuplicateCommittedText
+{
+  UIViewController* controller = nil;
+  UIWindow* const window = puglIosMakeTestWindow(&controller);
+  PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
+  XCTAssertNotEqual(world, NULL);
+
+  PuglIOSTestState state = {0U};
+  PuglView* const view = puglIosMakeTestView(world, controller.view, &state);
+  XCTAssertNotEqual(view, NULL);
+  XCTAssertEqual(puglGrabFocus(view), PUGL_SUCCESS);
+
+  PuglIOSTestKey* const key = [[PuglIOSTestKey alloc] init];
+  PuglIOSTestPress* const press = [[PuglIOSTestPress alloc] initWithKey:key];
+  NSSet* const presses = [NSSet setWithObject:(id)press];
+
+  [view->impl->wrapperView dispatchPresses:(NSSet<UIPress*>*)presses
+                                      type:PUGL_KEY_PRESS];
+  XCTAssertEqual(state.keyPress, 1U);
+  XCTAssertEqual(state.text, 1U);
+  XCTAssertEqual(state.lastHardwareKeycode, 0x04U);
+  XCTAssertEqual(state.lastKeycode, 0x04U);
+  XCTAssertEqual(state.lastCharacter, (uint32_t)'a');
+
+  state.keyPress = 0U;
+  state.keyRelease = 0U;
+  state.text = 0U;
+
+  XCTAssertEqual(puglStartTextInput(view), PUGL_SUCCESS);
+  [view->impl->textInputView dispatchPresses:(NSSet<UIPress*>*)presses
+                                        type:PUGL_KEY_PRESS];
+  [view->impl->textInputView dispatchPresses:(NSSet<UIPress*>*)presses
+                                        type:PUGL_KEY_RELEASE];
+  XCTAssertEqual(state.keyPress, 1U);
+  XCTAssertEqual(state.keyRelease, 1U);
+  XCTAssertEqual(state.text, 0U);
+  XCTAssertEqual(state.lastHardwareKeycode, 0x04U);
+
+  [view->impl->textInputView insertText:@"a"];
+  XCTAssertEqual(state.text, 1U);
+  XCTAssertEqual(state.lastKeycode, 0U);
+  XCTAssertEqual(state.lastCharacter, (uint32_t)'a');
+  XCTAssertEqual(state.lastState, 0U);
+
+  [press release];
+  [key release];
+  puglFreeView(view);
+  puglFreeWorld(world);
+  puglIosReleaseTestWindow(window, controller);
+}
+
 - (void)testResponderFailuresRemainTruthful
 {
   UIViewController* controller = nil;
@@ -349,6 +480,7 @@ puglIosReleaseTestWindow(UIWindow* const window,
 
   XCTAssertEqual(puglUnrealize(viewA), PUGL_SUCCESS);
   XCTAssertFalse(puglIsTextInputActive(viewA));
+  XCTAssertEqual(puglSetTextInputFlags(viewA, 0U), PUGL_SUCCESS);
   XCTAssertEqual(puglShow(viewA, PUGL_SHOW_PASSIVE), PUGL_SUCCESS);
   XCTAssertEqual(puglGrabFocus(viewA), PUGL_SUCCESS);
   XCTAssertEqual(puglStartTextInput(viewA), PUGL_SUCCESS);
