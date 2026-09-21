@@ -251,7 +251,7 @@ puglIosGlEnsureHint(PuglView* const view,
   UIScreen* const screen = self.window.screen;
   self.contentScaleFactor = screen ? screen.scale : [UIScreen mainScreen].scale;
 
-  if ([EAGLContext currentContext] == context) {
+  if (self.window && [EAGLContext currentContext] == context) {
     (void)[self resizeDrawable];
   }
 }
