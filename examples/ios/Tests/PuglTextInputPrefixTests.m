@@ -6,10 +6,10 @@
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 
-@interface PuglTextInputPrefixTests : XCTestCase
+@interface PuglIOSTestTextInputPrefixTests : XCTestCase
 @end
 
-@implementation PuglTextInputPrefixTests
+@implementation PuglIOSTestTextInputPrefixTests
 
 - (void)testRuntimeResponderTopologyUsesConsumerPrefix
 {
