@@ -1388,16 +1388,25 @@ puglStartTextInput(PuglView* view)
   impl->responderTransfer = true;
   (void)[protectedText becomeFirstResponder];
 
+  if (protectedText->puglview != view || protectedWrapper->puglview != view) {
+    [protectedText release];
+    [protectedWrapper release];
+    return PUGL_FAILURE;
+  }
+
   if (!protectedText.isFirstResponder && wrapperWasFirst &&
       !protectedWrapper.isFirstResponder) {
     (void)[protectedWrapper becomeFirstResponder];
+    if (protectedText->puglview != view || protectedWrapper->puglview != view) {
+      [protectedText release];
+      [protectedWrapper release];
+      return PUGL_FAILURE;
+    }
   }
 
   const bool active = protectedText.isFirstResponder;
-  impl->responderTransfer = false;
-  if (protectedText->puglview == view && protectedWrapper->puglview == view) {
-    puglIosDispatchFocusDelta(view, before);
-  }
+  view->impl->responderTransfer = false;
+  puglIosDispatchFocusDelta(view, before);
 
   [protectedText release];
   [protectedWrapper release];
@@ -1429,18 +1438,34 @@ puglStopTextInput(PuglView* view)
   impl->responderTransfer = true;
   (void)[protectedWrapper becomeFirstResponder];
 
+  if (protectedText->puglview != view || protectedWrapper->puglview != view) {
+    [protectedText release];
+    [protectedWrapper release];
+    return PUGL_FAILURE;
+  }
+
   if (!protectedWrapper.isFirstResponder && protectedText.isFirstResponder) {
     (void)[protectedText resignFirstResponder];
+    if (protectedText->puglview != view || protectedWrapper->puglview != view) {
+      [protectedText release];
+      [protectedWrapper release];
+      return PUGL_FAILURE;
+    }
+
     if (!protectedText.isFirstResponder) {
       (void)[protectedWrapper becomeFirstResponder];
+      if (protectedText->puglview != view ||
+          protectedWrapper->puglview != view) {
+        [protectedText release];
+        [protectedWrapper release];
+        return PUGL_FAILURE;
+      }
     }
   }
 
   const bool active = protectedText.isFirstResponder;
-  impl->responderTransfer = false;
-  if (protectedText->puglview == view && protectedWrapper->puglview == view) {
-    puglIosDispatchFocusDelta(view, before);
-  }
+  view->impl->responderTransfer = false;
+  puglIosDispatchFocusDelta(view, before);
 
   [protectedText release];
   [protectedWrapper release];

@@ -80,10 +80,12 @@ puglExampleEvent(PuglView* const view, const PuglEvent* const event)
     ++example->textLength;
     (void)puglSetTextInputFlags(
       view, example->textLength ? PUGL_TEXT_INPUT_HAS_TEXT : 0U);
+    NSString* const committed =
+      [NSString stringWithUTF8String:event->text.string];
     puglExampleSetStatus(
       example,
-      [NSString stringWithFormat:@"Committed text: %s",
-                                 event->text.string]);
+      [NSString stringWithFormat:@"Committed text: %@",
+                                 committed ? committed : @"?"]);
     break;
 
   case PUGL_TEXT_EDIT:

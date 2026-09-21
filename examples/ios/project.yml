@@ -86,7 +86,7 @@ targets:
       - path: ../../src/ios_stub.m
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.standalone.tests
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PuglStandalone.app/PuglStandalone"
         BUNDLE_LOADER: "$(TEST_HOST)"
         GCC_PREPROCESSOR_DEFINITIONS:
