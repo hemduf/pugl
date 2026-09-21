@@ -1210,6 +1210,9 @@ puglShow(PuglView* const view, const PuglShowCommand command)
     if (!st) {
       st = puglObscureView(view);
     }
+    if (!st) {
+      st = puglEmscriptenSyncFocus(view);
+    }
   }
 
   if (st) {

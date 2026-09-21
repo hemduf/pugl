@@ -13,5 +13,6 @@ void       puglEmscriptenUnregisterInput(PuglView* view);
 void       puglEmscriptenFreeInput(PuglView* view);
 PuglStatus puglEmscriptenGrabFocus(PuglView* view);
 bool       puglEmscriptenHasFocus(const PuglView* view);
+PuglStatus puglEmscriptenSyncFocus(PuglView* view);
 
 #endif // PUGL_SRC_EMSCRIPTEN_EVENTS_H
