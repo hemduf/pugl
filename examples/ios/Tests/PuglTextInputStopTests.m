@@ -74,9 +74,9 @@ puglIosTestStopReleaseWindow(UIWindow* const window,
 }
 
 static PuglView*
-puglIosTestStopMakeView(PuglWorld* const             world,
-                        UIView* const                parent,
-                        PuglIOSTestStopState* const  state)
+puglIosTestStopMakeView(PuglWorld* const            world,
+                        UIView* const               parent,
+                        PuglIOSTestStopState* const state)
 {
   PuglView* const view = puglNewView(world);
   if (!view || puglSetBackend(view, puglStubBackend()) ||
@@ -128,10 +128,10 @@ puglIosTestStopInstallWrapper(PuglView* const view)
   return wrapper;
 }
 
-@interface PuglTextInputStopTests : XCTestCase
+@interface PuglIOSTestTextInputStopTests : XCTestCase
 @end
 
-@implementation PuglTextInputStopTests
+@implementation PuglIOSTestTextInputStopTests
 
 - (void)testStopSucceedsWhenTextResignsButWrapperCannotRecoverFocus
 {
