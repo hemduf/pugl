@@ -52,8 +52,8 @@ puglIosTestEvent(PuglView* const view, const PuglEvent* const event)
 }
 
 static PuglView*
-puglIosMakeTestView(PuglWorld* const      world,
-                    UIView* const         parent,
+puglIosMakeTestView(PuglWorld* const        world,
+                    UIView* const           parent,
                     PuglIOSTestState* const state)
 {
   PuglView* const view = puglNewView(world);
@@ -77,6 +77,28 @@ puglIosMakeTestView(PuglWorld* const      world,
   return view;
 }
 
+static UIWindow*
+puglIosMakeTestWindow(UIViewController** const controller)
+{
+  UIWindow* const window =
+    [[UIWindow alloc] initWithFrame:CGRectMake(0.0, 0.0, 640.0, 360.0)];
+  *controller = [[UIViewController alloc] init];
+  window.rootViewController = *controller;
+  [window makeKeyAndVisible];
+  [(*controller).view layoutIfNeeded];
+  return window;
+}
+
+static void
+puglIosReleaseTestWindow(UIWindow* const window,
+                         UIViewController* const controller)
+{
+  window.hidden = YES;
+  window.rootViewController = nil;
+  [controller release];
+  [window release];
+}
+
 @interface PuglTextInputTests : XCTestCase
 @end
 
@@ -84,12 +106,8 @@ puglIosMakeTestView(PuglWorld* const      world,
 
 - (void)testTextInputLifecycleAndInstanceIsolation
 {
-  UIWindow* const window =
-    [[UIWindow alloc] initWithFrame:CGRectMake(0.0, 0.0, 640.0, 360.0)];
-  UIViewController* const controller = [[UIViewController alloc] init];
-  window.rootViewController = controller;
-  [window makeKeyAndVisible];
-  [controller.view layoutIfNeeded];
+  UIViewController* controller = nil;
+  UIWindow* const window = puglIosMakeTestWindow(&controller);
 
   PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
   XCTAssertNotEqual(world, NULL);
@@ -103,8 +121,13 @@ puglIosMakeTestView(PuglWorld* const      world,
   XCTAssertNotEqual(viewA, NULL);
   XCTAssertNotEqual(viewB, NULL);
 
+  XCTAssertFalse(puglHasFocus(viewA));
+  XCTAssertFalse(puglIsTextInputActive(viewA));
+  XCTAssertEqual(puglStartTextInput(viewA), PUGL_BAD_CALL);
+
   XCTAssertEqual(puglGrabFocus(viewA), PUGL_SUCCESS);
   XCTAssertTrue(puglHasFocus(viewA));
+  XCTAssertFalse(puglIsTextInputActive(viewA));
   XCTAssertEqual(stateA.focusIn, 1U);
 
   XCTAssertEqual(puglStartTextInput(viewA), PUGL_SUCCESS);
@@ -159,11 +182,56 @@ puglIosMakeTestView(PuglWorld* const      world,
   XCTAssertEqual(stateB.focusOut, focusOutBeforeFree);
 
   puglFreeWorld(world);
+  puglIosReleaseTestWindow(window, controller);
+}
 
-  window.hidden = YES;
-  window.rootViewController = nil;
-  [controller release];
-  [window release];
+- (void)testReopenAndIndependentWorldIsolation
+{
+  UIViewController* controller = nil;
+  UIWindow* const window = puglIosMakeTestWindow(&controller);
+
+  PuglWorld* const worldA = puglNewWorld(PUGL_MODULE, 0U);
+  PuglWorld* const worldB = puglNewWorld(PUGL_MODULE, 0U);
+  XCTAssertNotEqual(worldA, NULL);
+  XCTAssertNotEqual(worldB, NULL);
+
+  PuglIOSTestState stateA = {0U};
+  PuglIOSTestState stateB = {0U};
+  PuglView* const viewA =
+    puglIosMakeTestView(worldA, controller.view, &stateA);
+  PuglView* const viewB =
+    puglIosMakeTestView(worldB, controller.view, &stateB);
+  XCTAssertNotEqual(viewA, NULL);
+  XCTAssertNotEqual(viewB, NULL);
+
+  XCTAssertEqual(puglGrabFocus(viewA), PUGL_SUCCESS);
+  XCTAssertEqual(puglStartTextInput(viewA), PUGL_SUCCESS);
+  XCTAssertTrue(puglIsTextInputActive(viewA));
+
+  XCTAssertEqual(puglUnrealize(viewA), PUGL_SUCCESS);
+  XCTAssertFalse(puglIsTextInputActive(viewA));
+  XCTAssertEqual(puglShow(viewA, PUGL_SHOW_PASSIVE), PUGL_SUCCESS);
+  XCTAssertEqual(puglGrabFocus(viewA), PUGL_SUCCESS);
+  XCTAssertEqual(puglStartTextInput(viewA), PUGL_SUCCESS);
+  XCTAssertTrue(puglIsTextInputActive(viewA));
+
+  XCTAssertEqual(puglGrabFocus(viewB), PUGL_SUCCESS);
+  XCTAssertEqual(puglStartTextInput(viewB), PUGL_SUCCESS);
+  XCTAssertTrue(puglIsTextInputActive(viewB));
+
+  puglFreeView(viewA);
+  puglFreeWorld(worldA);
+  XCTAssertTrue(puglIsTextInputActive(viewB));
+
+  [viewB->impl->textInputView insertText:@"B"];
+  XCTAssertEqual(stateB.text, 1U);
+  XCTAssertEqual(stateB.lastCharacter, (uint32_t)'B');
+  XCTAssertEqual(stateB.lastKeycode, 0U);
+  XCTAssertEqual(stateB.lastState, 0U);
+
+  puglFreeView(viewB);
+  puglFreeWorld(worldB);
+  puglIosReleaseTestWindow(window, controller);
 }
 
 @end
