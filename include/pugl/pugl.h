@@ -95,6 +95,7 @@ typedef enum {
   PUGL_POINTER_MOVE,   ///< Pointer contact moved, a #PuglPointerEvent
   PUGL_POINTER_UP,     ///< Pointer contact ended, a #PuglPointerEvent
   PUGL_POINTER_CANCEL, ///< Pointer contact was cancelled, a #PuglPointerEvent
+  PUGL_TEXT_EDIT,      ///< Semantic text edit, a #PuglTextEditEvent
 } PuglEventType;
 
 /// Common flags for all event types
@@ -371,6 +372,19 @@ typedef enum {
 /// Bitwise OR of #PuglMod values
 typedef uint32_t PuglMods;
 
+/// Application-provided text input state flags
+typedef enum {
+  PUGL_TEXT_INPUT_HAS_TEXT = 1U << 0U, ///< The client has deletable text
+} PuglTextInputFlag;
+
+/// Bitwise OR of #PuglTextInputFlag values
+typedef uint32_t PuglTextInputFlags;
+
+/// Semantic text editing operations
+typedef enum {
+  PUGL_TEXT_DELETE_BACKWARD, ///< Request a semantic backward deletion
+} PuglTextEditType;
+
 /// Reason for a PuglCrossingEvent
 typedef enum {
   PUGL_CROSSING_NORMAL, ///< Crossing due to pointer motion
@@ -444,6 +458,20 @@ typedef struct {
   uint32_t       character; ///< Unicode character code
   char           string[8]; ///< UTF-8 string
 } PuglTextEvent;
+
+/**
+   Semantic text edit event.
+
+   This represents an editing request from the native text-input system, not a
+   physical key.  The client remains responsible for selection, grapheme, and
+   document semantics.
+*/
+typedef struct {
+  PuglEventType     type;  ///< #PUGL_TEXT_EDIT
+  PuglEventFlags    flags; ///< Bitwise OR of #PuglEventFlag values
+  double            time;  ///< Time in seconds
+  PuglTextEditType  edit;  ///< Semantic editing operation
+} PuglTextEditEvent;
 
 /**
    @}
@@ -736,6 +764,7 @@ typedef union {
   PuglExposeEvent    expose;    ///< #PUGL_EXPOSE
   PuglKeyEvent       key;       ///< #PUGL_KEY_PRESS, #PUGL_KEY_RELEASE
   PuglTextEvent      text;      ///< #PUGL_TEXT
+  PuglTextEditEvent  textEdit;  ///< #PUGL_TEXT_EDIT
   PuglCrossingEvent  crossing;  ///< #PUGL_POINTER_IN, #PUGL_POINTER_OUT
   PuglMotionEvent    motion;    ///< #PUGL_MOTION
   PuglScrollEvent    scroll;    ///< #PUGL_SCROLL
@@ -1276,7 +1305,7 @@ puglGetScaleFactor(const PuglView* view);
    Register support for accepting a type of dropped data.
 
    Before realizing the view, this should be called to register every type of
-   dragged data the view may accept when dropped.
+   dragged data the view may accept.
 
    @param view The view that will accept this type of dropped data.
    @param type The MIME type to accept, "text/plain" is assumed if `NULL`.
@@ -1321,8 +1350,8 @@ puglSetPositionHint(PuglView* view, PuglPositionHint hint, int x, int y);
 /**
    Get a size hint for the view.
 
-   This can be used to get the default, current, minimum, and maximum size of a
-   view, as well as the supported range of aspect ratios.
+   This can be used to get the default or current, minimum, and maximum size of
+   a view, as well as the supported range of aspect ratios.
 */
 PUGL_API PuglArea
 puglGetSizeHint(const PuglView* view, PuglSizeHint hint);
@@ -1596,6 +1625,48 @@ puglGrabFocus(PuglView* view);
 */
 PUGL_API bool
 puglHasFocus(const PuglView* view);
+
+/**
+   Start an explicit text-input session for a focused view.
+
+   This does not acquire logical keyboard focus.  The view must already be
+   realized, mapped, attached to its native hierarchy, and logically focused.
+   Calling this for an already-active session succeeds without changing state.
+
+   @return #PUGL_SUCCESS if the native text-input responder is active,
+   #PUGL_UNSUPPORTED on a backend without native text-input sessions, or an
+   error if a session cannot be started.
+*/
+PUGL_API PuglStatus
+puglStartTextInput(PuglView* view);
+
+/**
+   Stop the explicit text-input session for a view.
+
+   This operation is idempotent on supporting backends.  Stopping a session
+   attempts to preserve logical Pugl focus by returning native responder focus
+   to the ordinary view responder.
+*/
+PUGL_API PuglStatus
+puglStopTextInput(PuglView* view);
+
+/**
+   Return whether the native text-input session is actually active.
+
+   This reports native responder ownership, not software-keyboard visibility.
+*/
+PUGL_API bool
+puglIsTextInputActive(const PuglView* view);
+
+/**
+   Set application-provided state used by the native text-input responder.
+
+   This may be called for any allocated view, including before realization and
+   after unrealization.  Unknown flag bits are rejected with
+   #PUGL_BAD_PARAMETER.
+*/
+PUGL_API PuglStatus
+puglSetTextInputFlags(PuglView* view, PuglTextInputFlags flags);
 
 /**
    Request data from the general copy/paste clipboard.
