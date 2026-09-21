@@ -14,6 +14,7 @@ typedef struct {
   PuglWorld* world;
   PuglView*  view;
   UILabel*   statusLabel; // Non-owning; retained by the native Pugl view.
+  size_t     textLength;
 } PuglIOSExample;
 
 bool

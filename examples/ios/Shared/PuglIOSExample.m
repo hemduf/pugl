@@ -47,8 +47,19 @@ puglExampleEvent(PuglView* const view, const PuglEvent* const event)
     break;
 
   case PUGL_POINTER_DOWN:
-    (void)puglGrabFocus(view);
-    puglExampleSetStatus(example, @"Touch: keyboard focus requested");
+    if (puglIsTextInputActive(view)) {
+      const PuglStatus st = puglStopTextInput(view);
+      puglExampleSetStatus(
+        example,
+        st ? @"Text input stop failed" : @"Text input stopped");
+    } else {
+      const PuglStatus focusStatus = puglGrabFocus(view);
+      const PuglStatus inputStatus =
+        focusStatus ? focusStatus : puglStartTextInput(view);
+      puglExampleSetStatus(
+        example,
+        inputStatus ? @"Text input start failed" : @"Text input active");
+    }
     break;
 
   case PUGL_FOCUS_IN:
@@ -63,6 +74,29 @@ puglExampleEvent(PuglView* const view, const PuglEvent* const event)
     puglExampleSetStatus(
       example,
       [NSString stringWithFormat:@"Hardware key: 0x%X", event->key.key]);
+    break;
+
+  case PUGL_TEXT:
+    ++example->textLength;
+    (void)puglSetTextInputFlags(
+      view, example->textLength ? PUGL_TEXT_INPUT_HAS_TEXT : 0U);
+    puglExampleSetStatus(
+      example,
+      [NSString stringWithFormat:@"Committed text: %s",
+                                 event->text.string]);
+    break;
+
+  case PUGL_TEXT_EDIT:
+    if (event->textEdit.edit == PUGL_TEXT_DELETE_BACKWARD &&
+        example->textLength) {
+      --example->textLength;
+    }
+    (void)puglSetTextInputFlags(
+      view, example->textLength ? PUGL_TEXT_INPUT_HAS_TEXT : 0U);
+    puglExampleSetStatus(
+      example,
+      [NSString stringWithFormat:@"Delete backward (%zu left)",
+                                 example->textLength]);
     break;
 
   default:
@@ -162,8 +196,8 @@ puglIOSExampleInit(PuglIOSExample* const example,
                                            weight:UIFontWeightMedium];
   label.text =
     worldType == PUGL_MODULE
-      ? @"Pugl AUv3\nTouch to request focus"
-      : @"Pugl standalone iOS\nTouch to request focus";
+      ? @"Pugl AUv3\nTouch to toggle text input"
+      : @"Pugl standalone iOS\nTouch to toggle text input";
   label.userInteractionEnabled = NO;
 
   [nativeView addSubview:label];

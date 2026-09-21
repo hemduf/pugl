@@ -75,6 +75,31 @@ targets:
       - target: PuglAUv3Extension
         embed: true
 
+  PuglIOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+      - path: ../../src/common.c
+      - path: ../../src/internal.c
+      - path: ../../src/ios.m
+      - path: ../../src/ios_stub.m
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.ios.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PuglStandalone.app/PuglStandalone"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GCC_PREPROCESSOR_DEFINITIONS:
+          - "$(inherited)"
+          - "PUGL_INTERNAL=1"
+          - "PUGL_OBJC_CLASS_PREFIX=PuglIOSTest"
+    dependencies:
+      - target: PuglStandalone
+      - sdk: Foundation.framework
+      - sdk: QuartzCore.framework
+      - sdk: UIKit.framework
+      - sdk: XCTest.framework
+
   PuglAUv3Extension:
     type: app-extension
     platform: iOS
@@ -130,3 +155,12 @@ schemes:
     build:
       targets:
         PuglAUv3Container: all
+
+
+  PuglIOSTests:
+    build:
+      targets:
+        PuglIOSTests: [test]
+    test:
+      targets:
+        - PuglIOSTests
