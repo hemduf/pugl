@@ -16,21 +16,21 @@ static_assert(std::is_same<pugl::TextEditType, PuglTextEditType>::value,
 static_assert(pugl::TextEditEvent::type == PUGL_TEXT_EDIT,
               "TextEditEvent must dispatch PUGL_TEXT_EDIT");
 
-@interface PuglTextInputCppTests : XCTestCase
+@interface PuglIOSTestTextInputCppTests : XCTestCase
 @end
 
-@implementation PuglTextInputCppTests
+@implementation PuglIOSTestTextInputCppTests
 
 - (void)testPortableCppSurfaceBeforeRealization
 {
   pugl::World world{pugl::WorldType::module};
   pugl::View view{world};
 
-  XCTAssertEqual(view.setTextInputFlags(PUGL_TEXT_INPUT_HAS_TEXT),
-                 pugl::Status::success);
+  XCTAssertTrue(view.setTextInputFlags(PUGL_TEXT_INPUT_HAS_TEXT) ==
+                pugl::Status::success);
   XCTAssertFalse(view.isTextInputActive());
-  XCTAssertEqual(view.startTextInput(), pugl::Status::badCall);
-  XCTAssertEqual(view.stopTextInput(), pugl::Status::success);
+  XCTAssertTrue(view.startTextInput() == pugl::Status::badCall);
+  XCTAssertTrue(view.stopTextInput() == pugl::Status::success);
 }
 
 @end
