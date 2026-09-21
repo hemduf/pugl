@@ -1513,6 +1513,28 @@ puglHasFocus(const PuglView* const view)
 }
 
 PuglStatus
+puglStartTextInput(PuglView* view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+PuglStatus
+puglStopTextInput(PuglView* view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+bool
+puglIsTextInputActive(const PuglView* view)
+{
+  (void)view;
+  return false;
+}
+
+
+PuglStatus
 puglStartTimer(PuglView* const view, const uintptr_t id, const double timeout)
 {
 #if USE_XSYNC

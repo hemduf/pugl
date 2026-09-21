@@ -1067,6 +1067,28 @@ puglHasFocus(const PuglView* view)
   return GetFocus() == view->impl->hwnd;
 }
 
+PuglStatus
+puglStartTextInput(PuglView* view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+PuglStatus
+puglStopTextInput(PuglView* view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+bool
+puglIsTextInputActive(const PuglView* view)
+{
+  (void)view;
+  return false;
+}
+
+
 static bool
 styleIsMaximized(const PuglViewStyleFlags flags)
 {

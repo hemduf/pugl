@@ -1121,6 +1121,28 @@ puglHasFocus(const PuglView* view)
 }
 
 PuglStatus
+puglStartTextInput(PuglView* view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+PuglStatus
+puglStopTextInput(PuglView* view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+bool
+puglIsTextInputActive(const PuglView* view)
+{
+  (void)view;
+  return false;
+}
+
+
+PuglStatus
 puglSetViewStyle(PuglView* const view, const PuglViewStyleFlags flags)
 {
   if (!view || !view->impl || !view->impl->wrapperView) {

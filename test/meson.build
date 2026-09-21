@@ -36,6 +36,7 @@ basic_tests = [
   'strerror',
   'stub',
   'stub_hints',
+  'text_input',
   'update',
   'view',
   'world',
