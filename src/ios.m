@@ -93,12 +93,38 @@ puglIosFirstScalar(NSString* const string)
   }
 
   const unichar first = [string characterAtIndex:0U];
-  if (first >= 0xD800U && first <= 0xDBFFU && string.length > 1U) {
-    const unichar second = [string characterAtIndex:1U];
-    if (second >= 0xDC00U && second <= 0xDFFFU) {
-      return 0x10000U + (((uint32_t)first - 0xD800U) << 10U) +
-             ((uint32_t)second - 0xDC00U);
+  if (first >= 0xD800U && first <= 0xDBFFU) {
+    if (string.length > 1U) {
+      const unichar second = [string characterAtIndex:1U];
+      if (second >= 0xDC00U && second <= 0xDFFFU) {
+        return 0x10000U + (((uint32_t)first - 0xD800U) << 10U) +
+               ((uint32_t)second - 0xDC00U);
+      }
     }
+    return 0xFFFDU;
+  }
+
+  return (first >= 0xDC00U && first <= 0xDFFFU) ? 0xFFFDU : (uint32_t)first;
+}
+
+static uint32_t
+puglIosNextScalar(NSString* const string, NSUInteger* const index)
+{
+  if (!string || !index || *index >= string.length) {
+    return 0U;
+  }
+
+  const unichar first = [string characterAtIndex:(*index)++];
+  if (first >= 0xD800U && first <= 0xDBFFU) {
+    if (*index < string.length) {
+      const unichar second = [string characterAtIndex:*index];
+      if (second >= 0xDC00U && second <= 0xDFFFU) {
+        ++(*index);
+        return 0x10000U + (((uint32_t)first - 0xD800U) << 10U) +
+               ((uint32_t)second - 0xDC00U);
+      }
+    }
+    return 0xFFFDU;
   }
 
   return (first >= 0xDC00U && first <= 0xDFFFU) ? 0xFFFDU : (uint32_t)first;
@@ -204,6 +230,47 @@ puglIosKey(const UIKey* const key)
   return puglIosFirstScalar(key.charactersIgnoringModifiers);
 }
 
+static bool
+puglIosViewIsLive(const PuglView* const view)
+{
+  return view && view->impl && !view->impl->tearingDown &&
+         view->impl->wrapperView && view->impl->wrapperView->puglview == view &&
+         view->stage >= PUGL_VIEW_STAGE_REALIZED;
+}
+
+static bool
+puglIosLogicalFocus(const PuglView* const view)
+{
+  return view && view->impl &&
+         ((view->impl->wrapperView &&
+           view->impl->wrapperView.isFirstResponder) ||
+          (view->impl->textInputView &&
+           view->impl->textInputView.isFirstResponder));
+}
+
+static PuglStatus
+puglIosPublishFocusDelta(PuglView* const view, const bool previousFocus)
+{
+  if (!puglIosViewIsLive(view) || view->impl->responderTransfer) {
+    return PUGL_SUCCESS;
+  }
+
+  const bool currentFocus = puglIosLogicalFocus(view);
+  if (currentFocus == previousFocus) {
+    return PUGL_SUCCESS;
+  }
+
+  const PuglFocusEvent focus = {
+    currentFocus ? PUGL_FOCUS_IN : PUGL_FOCUS_OUT,
+    0U,
+    PUGL_CROSSING_NORMAL,
+  };
+  PuglEvent event;
+  memset(&event, 0, sizeof(event));
+  event.focus = focus;
+  return puglDispatchEvent(view, &event);
+}
+
 static void
 puglIosDispatchText(PuglWrapperView* const wrapper,
                     const UIKey* const      key,
@@ -222,18 +289,7 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
       break;
     }
 
-    const unichar first = [text characterAtIndex:i++];
-    uint32_t scalar = first;
-
-    if (first >= 0xD800U && first <= 0xDBFFU && i < text.length) {
-      const unichar second = [text characterAtIndex:i];
-      if (second >= 0xDC00U && second <= 0xDFFFU) {
-        ++i;
-        scalar = 0x10000U + (((uint32_t)first - 0xD800U) << 10U) +
-                 ((uint32_t)second - 0xDC00U);
-      }
-    }
-
+    const uint32_t scalar = puglIosNextScalar(text, &i);
     if ((scalar < 0x20U && scalar != '\t' && scalar != '\n' &&
          scalar != '\r') ||
         scalar == 0x7FU) {
@@ -260,6 +316,56 @@ puglIosDispatchText(PuglWrapperView* const wrapper,
     event.text = textEvent;
     puglDispatchEvent(view, &event);
   }
+}
+
+static void
+puglIosDispatchHardwarePresses(PuglWrapperView* const wrapper,
+                               NSSet<UIPress*>* const presses,
+                               const PuglEventType type,
+                               const bool dispatchCommittedText)
+{
+  if (!wrapper) {
+    return;
+  }
+
+  PuglWrapperView* const protectedWrapper = [wrapper retain];
+  for (UIPress* const press in presses) {
+    PuglView* const view = protectedWrapper->puglview;
+    if (!view) {
+      break;
+    }
+
+    UIKey* const key = press.key;
+    if (!key) {
+      continue;
+    }
+
+    const PuglMods state = puglIosModifiers(key.modifierFlags);
+    const PuglKeyEvent keyEvent = {
+      type,
+      0U,
+      puglGetTime(view->world),
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      state,
+      (uint32_t)key.keyCode,
+      puglIosKey(key),
+    };
+
+    PuglEvent event;
+    memset(&event, 0, sizeof(event));
+    event.key = keyEvent;
+    puglDispatchEvent(view, &event);
+
+    if (dispatchCommittedText && type == PUGL_KEY_PRESS &&
+        protectedWrapper->puglview == view) {
+      puglIosDispatchText(protectedWrapper, key, state);
+    }
+  }
+
+  [protectedWrapper release];
 }
 
 static void
@@ -310,31 +416,31 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
 
 - (BOOL)becomeFirstResponder
 {
+  PuglWrapperView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
+  const bool previousFocus = puglIosViewIsLive(view) && puglIosLogicalFocus(view);
   const BOOL changed = [super becomeFirstResponder];
-  if (changed && puglview && puglview->stage >= PUGL_VIEW_STAGE_REALIZED) {
-    const PuglFocusEvent focus = {
-      PUGL_FOCUS_IN, 0U, PUGL_CROSSING_NORMAL};
-    PuglEvent event;
-    memset(&event, 0, sizeof(event));
-    event.focus = focus;
-    puglDispatchEvent(puglview, &event);
+
+  if (changed && protectedSelf->puglview == view && puglIosViewIsLive(view)) {
+    (void)puglIosPublishFocusDelta(view, previousFocus);
   }
+
+  [protectedSelf release];
   return changed;
 }
 
 - (BOOL)resignFirstResponder
 {
-  const BOOL wasFirstResponder = self.isFirstResponder;
+  PuglWrapperView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
+  const bool previousFocus = puglIosViewIsLive(view) && puglIosLogicalFocus(view);
   const BOOL changed = [super resignFirstResponder];
-  if (wasFirstResponder && changed && puglview &&
-      puglview->stage >= PUGL_VIEW_STAGE_REALIZED) {
-    const PuglFocusEvent focus = {
-      PUGL_FOCUS_OUT, 0U, PUGL_CROSSING_NORMAL};
-    PuglEvent event;
-    memset(&event, 0, sizeof(event));
-    event.focus = focus;
-    puglDispatchEvent(puglview, &event);
+
+  if (changed && protectedSelf->puglview == view && puglIosViewIsLive(view)) {
+    (void)puglIosPublishFocusDelta(view, previousFocus);
   }
+
+  [protectedSelf release];
   return changed;
 }
 
@@ -762,44 +868,7 @@ puglIosIsMouseTouch(UITouch* const touch)
 
 - (void)dispatchPresses:(NSSet<UIPress*>*)presses type:(PuglEventType)type
 {
-  PuglWrapperView* const protectedSelf = [self retain];
-
-  for (UIPress* const press in presses) {
-    PuglView* const view = protectedSelf->puglview;
-    if (!view) {
-      break;
-    }
-
-    UIKey* const key = press.key;
-    if (!key) {
-      continue;
-    }
-
-    const PuglMods state = puglIosModifiers(key.modifierFlags);
-    const PuglKeyEvent keyEvent = {
-      type,
-      0U,
-      puglGetTime(view->world),
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      state,
-      (uint32_t)key.keyCode,
-      puglIosKey(key),
-    };
-
-    PuglEvent event;
-    memset(&event, 0, sizeof(event));
-    event.key = keyEvent;
-    puglDispatchEvent(view, &event);
-
-    if (type == PUGL_KEY_PRESS && protectedSelf->puglview == view) {
-      puglIosDispatchText(protectedSelf, key, state);
-    }
-  }
-
-  [protectedSelf release];
+  puglIosDispatchHardwarePresses(self, presses, type, true);
 }
 
 - (void)pressesBegan:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event
@@ -812,6 +881,152 @@ puglIosIsMouseTouch(UITouch* const touch)
 {
   (void)event;
   [self dispatchPresses:presses type:PUGL_KEY_RELEASE];
+}
+
+@end
+
+static bool
+puglIosTextResponderOwnsView(PuglTextInputView* const responder,
+                             PuglView* const view)
+{
+  return responder && view && responder->puglview == view &&
+         puglIosViewIsLive(view) && view->impl->textInputView == responder;
+}
+
+@implementation PuglTextInputView
+
+- (BOOL)canBecomeFirstResponder
+{
+  return YES;
+}
+
+- (BOOL)becomeFirstResponder
+{
+  PuglTextInputView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
+  const bool previousFocus =
+    puglIosTextResponderOwnsView(protectedSelf, view) &&
+    puglIosLogicalFocus(view);
+  const BOOL changed = [super becomeFirstResponder];
+
+  if (changed && puglIosTextResponderOwnsView(protectedSelf, view)) {
+    (void)puglIosPublishFocusDelta(view, previousFocus);
+  }
+
+  [protectedSelf release];
+  return changed;
+}
+
+- (BOOL)resignFirstResponder
+{
+  PuglTextInputView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
+  const bool previousFocus =
+    puglIosTextResponderOwnsView(protectedSelf, view) &&
+    puglIosLogicalFocus(view);
+  const BOOL changed = [super resignFirstResponder];
+
+  if (changed && puglIosTextResponderOwnsView(protectedSelf, view)) {
+    (void)puglIosPublishFocusDelta(view, previousFocus);
+  }
+
+  [protectedSelf release];
+  return changed;
+}
+
+- (BOOL)hasText
+{
+  PuglView* const view = puglview;
+  return puglIosTextResponderOwnsView(self, view) &&
+         (view->textInputFlags & PUGL_TEXT_INPUT_HAS_TEXT);
+}
+
+- (void)insertText:(NSString*)text
+{
+  PuglTextInputView* const protectedSelf = [self retain];
+
+  for (NSUInteger i = 0U; i < text.length;) {
+    PuglView* const view = protectedSelf->puglview;
+    if (!puglIosTextResponderOwnsView(protectedSelf, view) ||
+        !protectedSelf.isFirstResponder) {
+      break;
+    }
+
+    const uint32_t scalar = puglIosNextScalar(text, &i);
+    if ((scalar < 0x20U && scalar != '\t' && scalar != '\n' &&
+         scalar != '\r') ||
+        scalar == 0x7FU) {
+      continue;
+    }
+
+    PuglTextEvent textEvent = {
+      PUGL_TEXT,
+      0U,
+      puglGetTime(view->world),
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0U,
+      0U,
+      scalar,
+      {0},
+    };
+    puglIosEncodeUtf8(scalar, textEvent.string);
+
+    PuglEvent event;
+    memset(&event, 0, sizeof(event));
+    event.text = textEvent;
+    puglDispatchEvent(view, &event);
+  }
+
+  [protectedSelf release];
+}
+
+- (void)deleteBackward
+{
+  PuglTextInputView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
+
+  if (puglIosTextResponderOwnsView(protectedSelf, view) &&
+      protectedSelf.isFirstResponder) {
+    const PuglTextEditEvent textEdit = {
+      PUGL_TEXT_EDIT,
+      0U,
+      puglGetTime(view->world),
+      PUGL_TEXT_DELETE_BACKWARD,
+    };
+    PuglEvent event;
+    memset(&event, 0, sizeof(event));
+    event.textEdit = textEdit;
+    puglDispatchEvent(view, &event);
+  }
+
+  [protectedSelf release];
+}
+
+- (void)pressesBegan:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event
+{
+  (void)event;
+  PuglTextInputView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
+  if (puglIosTextResponderOwnsView(protectedSelf, view)) {
+    puglIosDispatchHardwarePresses(
+      view->impl->wrapperView, presses, PUGL_KEY_PRESS, false);
+  }
+  [protectedSelf release];
+}
+
+- (void)pressesEnded:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event
+{
+  (void)event;
+  PuglTextInputView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
+  if (puglIosTextResponderOwnsView(protectedSelf, view)) {
+    puglIosDispatchHardwarePresses(
+      view->impl->wrapperView, presses, PUGL_KEY_RELEASE, false);
+  }
+  [protectedSelf release];
 }
 
 @end
@@ -903,6 +1118,9 @@ puglRealize(PuglView* view)
     return PUGL_BAD_CONFIGURATION;
   }
 
+  view->impl->tearingDown = false;
+  view->impl->responderTransfer = false;
+
   puglEnsureHint(view, PUGL_RED_BITS, 8);
   puglEnsureHint(view, PUGL_GREEN_BITS, 8);
   puglEnsureHint(view, PUGL_BLUE_BITS, 8);
@@ -952,6 +1170,23 @@ puglRealize(PuglView* view)
     UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [wrapper addSubview:view->impl->drawView];
 
+  PuglTextInputView* const textInput =
+    [[PuglTextInputView alloc] initWithFrame:CGRectZero];
+  if (!textInput) {
+    view->backend->destroy(view);
+    wrapper->puglview = NULL;
+    [wrapper release];
+    view->impl->wrapperView = nil;
+    return PUGL_NO_MEMORY;
+  }
+
+  textInput->puglview = view;
+  textInput.opaque = NO;
+  textInput.backgroundColor = [UIColor clearColor];
+  textInput.accessibilityElementsHidden = YES;
+  view->impl->textInputView = textInput;
+  [wrapper addSubview:textInput];
+
   if (view->parent) {
     UIView* const parent = (UIView*)view->parent;
     [parent addSubview:wrapper];
@@ -961,6 +1196,10 @@ puglRealize(PuglView* view)
     if (!window || !controller) {
       [controller release];
       [window release];
+      textInput->puglview = NULL;
+      [textInput removeFromSuperview];
+      [textInput release];
+      view->impl->textInputView = nil;
       view->backend->destroy(view);
       wrapper->puglview = NULL;
       [wrapper release];
@@ -987,6 +1226,124 @@ puglRealize(PuglView* view)
   return status;
 }
 
+PuglStatus
+puglStartTextInput(PuglView* const view)
+{
+  if (!view || !view->impl) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglInternals* const impl = view->impl;
+  PuglWrapperView* const wrapper = impl->wrapperView;
+  PuglTextInputView* const textInput = impl->textInputView;
+  if (!wrapper || !textInput || view->stage < PUGL_VIEW_STAGE_REALIZED ||
+      !wrapper.window || (puglIosViewStyle(view) & PUGL_VIEW_STYLE_HIDDEN)) {
+    return PUGL_FAILURE;
+  }
+
+  if (!puglHasFocus(view)) {
+    return PUGL_FAILURE;
+  }
+
+  if (textInput.isFirstResponder) {
+    return PUGL_SUCCESS;
+  }
+
+  if (impl->responderTransfer || impl->tearingDown) {
+    return PUGL_BAD_CALL;
+  }
+
+  PuglWrapperView* const protectedWrapper = [wrapper retain];
+  PuglTextInputView* const protectedTextInput = [textInput retain];
+  const bool previousFocus = puglIosLogicalFocus(view);
+  impl->responderTransfer = true;
+
+  (void)[protectedTextInput becomeFirstResponder];
+
+  bool ownsView = protectedWrapper->puglview == view &&
+                  protectedTextInput->puglview == view;
+  if (ownsView && !protectedTextInput.isFirstResponder &&
+      !protectedWrapper.isFirstResponder) {
+    (void)[protectedWrapper becomeFirstResponder];
+  }
+
+  ownsView = protectedWrapper->puglview == view &&
+             protectedTextInput->puglview == view;
+  if (ownsView &&
+      ((puglIosViewStyle(view) & PUGL_VIEW_STYLE_HIDDEN) || !protectedWrapper.window) &&
+      protectedTextInput.isFirstResponder) {
+    (void)[protectedTextInput resignFirstResponder];
+  }
+
+  const bool active = ownsView && protectedTextInput.isFirstResponder;
+  if (ownsView) {
+    impl->responderTransfer = false;
+    (void)puglIosPublishFocusDelta(view, previousFocus);
+  }
+
+  [protectedTextInput release];
+  [protectedWrapper release];
+  return active ? PUGL_SUCCESS : PUGL_FAILURE;
+}
+
+PuglStatus
+puglStopTextInput(PuglView* const view)
+{
+  if (!view || !view->impl) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  PuglInternals* const impl = view->impl;
+  PuglWrapperView* const wrapper = impl->wrapperView;
+  PuglTextInputView* const textInput = impl->textInputView;
+  if (!textInput || !textInput.isFirstResponder) {
+    return PUGL_SUCCESS;
+  }
+
+  if (!wrapper || impl->responderTransfer || impl->tearingDown) {
+    return PUGL_BAD_CALL;
+  }
+
+  PuglWrapperView* const protectedWrapper = [wrapper retain];
+  PuglTextInputView* const protectedTextInput = [textInput retain];
+  const bool previousFocus = puglIosLogicalFocus(view);
+  impl->responderTransfer = true;
+
+  (void)[protectedWrapper becomeFirstResponder];
+
+  bool ownsView = protectedWrapper->puglview == view &&
+                  protectedTextInput->puglview == view;
+  if (ownsView && !protectedWrapper.isFirstResponder &&
+      protectedTextInput.isFirstResponder) {
+    (void)[protectedTextInput resignFirstResponder];
+  }
+
+  ownsView = protectedWrapper->puglview == view &&
+             protectedTextInput->puglview == view;
+  if (ownsView && !protectedTextInput.isFirstResponder &&
+      !protectedWrapper.isFirstResponder && protectedWrapper.window &&
+      !(puglIosViewStyle(view) & PUGL_VIEW_STYLE_HIDDEN)) {
+    (void)[protectedWrapper becomeFirstResponder];
+  }
+
+  const bool active = ownsView && protectedTextInput.isFirstResponder;
+  if (ownsView) {
+    impl->responderTransfer = false;
+    (void)puglIosPublishFocusDelta(view, previousFocus);
+  }
+
+  [protectedTextInput release];
+  [protectedWrapper release];
+  return active ? PUGL_FAILURE : PUGL_SUCCESS;
+}
+
+bool
+puglIsTextInputActive(const PuglView* const view)
+{
+  return view && view->impl && view->impl->textInputView &&
+         view->impl->textInputView.isFirstResponder;
+}
+
 static void
 puglIosReleaseViewResources(PuglView* const view)
 {
@@ -996,17 +1353,33 @@ puglIosReleaseViewResources(PuglView* const view)
 
   PuglInternals* const impl = view->impl;
   PuglWrapperView* const wrapper = impl->wrapperView;
+  PuglTextInputView* const textInput = impl->textInputView;
+
+  impl->tearingDown = true;
+  impl->responderTransfer = true;
 
   if (wrapper) {
     // Disable all future native callbacks before responder/view teardown can
     // synchronously call back into the client.
     puglIosInvalidateTimers(wrapper);
     wrapper->puglview = NULL;
+  }
+  if (textInput) {
+    textInput->puglview = NULL;
+    (void)[textInput resignFirstResponder];
+  }
+  if (wrapper) {
     (void)[wrapper resignFirstResponder];
   }
 
   if (view->backend && impl->drawView) {
     view->backend->destroy(view);
+  }
+
+  if (textInput) {
+    [textInput removeFromSuperview];
+    [textInput release];
+    impl->textInputView = nil;
   }
 
   if (wrapper) {
@@ -1033,6 +1406,8 @@ puglIosReleaseViewResources(PuglView* const view)
   }
 
   memset(&view->lastConfigure, 0, sizeof(PuglConfigureEvent));
+  impl->responderTransfer = false;
+  impl->tearingDown = false;
 }
 
 PuglStatus
@@ -1042,9 +1417,10 @@ puglUnrealize(PuglView* const view)
     return PUGL_FAILURE;
   }
 
+  const PuglStatus textStatus = puglStopTextInput(view);
   const PuglStatus status = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
   puglIosReleaseViewResources(view);
-  return status;
+  return status ? status : textStatus;
 }
 
 PuglStatus
@@ -1077,12 +1453,15 @@ puglHide(PuglView* view)
     return PUGL_FAILURE;
   }
 
+  const PuglStatus textStatus = puglStopTextInput(view);
   view->impl->wrapperView.hidden = YES;
   if (view->impl->window) {
     view->impl->window.hidden = YES;
   }
 
-  return [view->impl->wrapperView dispatchCurrentConfiguration];
+  const PuglStatus status =
+    [view->impl->wrapperView dispatchCurrentConfiguration];
+  return status ? status : textStatus;
 }
 
 void
@@ -1109,6 +1488,10 @@ puglGrabFocus(PuglView* view)
     return PUGL_FAILURE;
   }
 
+  if (puglIosLogicalFocus(view)) {
+    return PUGL_SUCCESS;
+  }
+
   return [view->impl->wrapperView becomeFirstResponder] ? PUGL_SUCCESS
                                                         : PUGL_FAILURE;
 }
@@ -1116,8 +1499,7 @@ puglGrabFocus(PuglView* view)
 bool
 puglHasFocus(const PuglView* view)
 {
-  return view && view->impl && view->impl->wrapperView &&
-         view->impl->wrapperView.isFirstResponder;
+  return puglIosLogicalFocus(view);
 }
 
 PuglStatus
