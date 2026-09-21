@@ -88,7 +88,7 @@ targets:
     settings:
       base:
         APPLICATION_EXTENSION_API_ONLY: YES
-        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.auv3.extension
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.auv3.container.extension
         SKIP_INSTALL: YES
         GCC_PREPROCESSOR_DEFINITIONS:
           - "$(inherited)"
