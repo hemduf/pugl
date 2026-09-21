@@ -10,6 +10,7 @@
 
 #include <mach/mach_time.h>
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -25,6 +26,7 @@
 #define PUGL_OBJC_JOIN_INNER(a, b) a##b
 #define PUGL_OBJC_JOIN(a, b) PUGL_OBJC_JOIN_INNER(a, b)
 #define PuglWrapperView PUGL_OBJC_JOIN(PUGL_OBJC_CLASS_PREFIX, WrapperView)
+#define PuglTextInputView PUGL_OBJC_JOIN(PUGL_OBJC_CLASS_PREFIX, TextInputView)
 #define PuglOpenGLView PUGL_OBJC_JOIN(PUGL_OBJC_CLASS_PREFIX, OpenGLView)
 #define PuglStubView PUGL_OBJC_JOIN(PUGL_OBJC_CLASS_PREFIX, StubView)
 
@@ -46,18 +48,27 @@
 
 @end
 
+@interface PuglTextInputView : UIView <UIKeyInput> {
+@public
+  PuglView* puglview;
+}
+@end
+
 struct PuglWorldInternalsImpl {
   UIScreen*                 screen;
   struct mach_timebase_info timebaseInfo;
 };
 
 struct PuglInternalsImpl {
-  PuglWrapperView* wrapperView;
-  UIView*          drawView;
-  UIWindow*        window;
-  UIViewController* viewController;
-  NSData*          clipboardData;
-  NSString*        clipboardType;
+  PuglWrapperView*   wrapperView;
+  PuglTextInputView* textInputView;
+  UIView*            drawView;
+  UIWindow*          window;
+  UIViewController*  viewController;
+  NSData*            clipboardData;
+  NSString*          clipboardType;
+  bool               responderTransfer;
+  bool               tearingDown;
 };
 
 #endif // PUGL_SRC_IOS_H
