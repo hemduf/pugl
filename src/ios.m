@@ -395,23 +395,27 @@ puglIosInvalidateTimers(PuglWrapperView* const wrapper)
 
 - (BOOL)becomeFirstResponder
 {
-  PuglView* const view = puglview;
+  PuglWrapperView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
   const bool before = puglIosHasLogicalFocus(view);
   const BOOL changed = [super becomeFirstResponder];
-  if (changed && puglview == view) {
+  if (changed && protectedSelf->puglview == view) {
     puglIosDispatchFocusDelta(view, before);
   }
+  [protectedSelf release];
   return changed;
 }
 
 - (BOOL)resignFirstResponder
 {
-  PuglView* const view = puglview;
+  PuglWrapperView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
   const bool before = puglIosHasLogicalFocus(view);
   const BOOL changed = [super resignFirstResponder];
-  if (changed && puglview == view) {
+  if (changed && protectedSelf->puglview == view) {
     puglIosDispatchFocusDelta(view, before);
   }
+  [protectedSelf release];
   return changed;
 }
 
@@ -886,23 +890,27 @@ puglIosIsMouseTouch(UITouch* const touch)
 
 - (BOOL)becomeFirstResponder
 {
-  PuglView* const view = puglview;
+  PuglTextInputView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
   const bool before = puglIosHasLogicalFocus(view);
   const BOOL changed = [super becomeFirstResponder];
-  if (changed && puglview == view) {
+  if (changed && protectedSelf->puglview == view) {
     puglIosDispatchFocusDelta(view, before);
   }
+  [protectedSelf release];
   return changed;
 }
 
 - (BOOL)resignFirstResponder
 {
-  PuglView* const view = puglview;
+  PuglTextInputView* const protectedSelf = [self retain];
+  PuglView* const view = protectedSelf->puglview;
   const bool before = puglIosHasLogicalFocus(view);
   const BOOL changed = [super resignFirstResponder];
-  if (changed && puglview == view) {
+  if (changed && protectedSelf->puglview == view) {
     puglIosDispatchFocusDelta(view, before);
   }
+  [protectedSelf release];
   return changed;
 }
 
@@ -1208,6 +1216,8 @@ puglIosReleaseViewResources(PuglView* const view)
   PuglWrapperView* const wrapper = impl->wrapperView;
   PuglTextInputView* const textInputView = impl->textInputView;
 
+  impl->responderTransfer = false;
+
   if (wrapper) {
     puglIosInvalidateTimers(wrapper);
   }
@@ -1397,6 +1407,17 @@ puglStartTextInput(PuglView* view)
   if (!protectedText.isFirstResponder && wrapperWasFirst &&
       !protectedWrapper.isFirstResponder) {
     (void)[protectedWrapper becomeFirstResponder];
+    if (protectedText->puglview != view || protectedWrapper->puglview != view) {
+      [protectedText release];
+      [protectedWrapper release];
+      return PUGL_FAILURE;
+    }
+  }
+
+  if (protectedText.isFirstResponder &&
+      (protectedWrapper.hidden || !protectedWrapper.window ||
+       !puglGetVisible(view))) {
+    (void)[protectedText resignFirstResponder];
     if (protectedText->puglview != view || protectedWrapper->puglview != view) {
       [protectedText release];
       [protectedWrapper release];

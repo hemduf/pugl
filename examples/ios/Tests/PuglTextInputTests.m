@@ -108,6 +108,7 @@ puglIosMakeTestView(PuglWorld* const      world,
   XCTAssertEqual(stateA.focusIn, 1U);
 
   XCTAssertEqual(puglStartTextInput(viewA), PUGL_SUCCESS);
+  XCTAssertEqual(puglStartTextInput(viewA), PUGL_SUCCESS);
   XCTAssertTrue(puglIsTextInputActive(viewA));
   XCTAssertTrue(puglHasFocus(viewA));
   XCTAssertEqual(stateA.focusIn, 1U);
@@ -129,16 +130,26 @@ puglIosMakeTestView(PuglWorld* const      world,
   [viewA->impl->textInputView deleteBackward];
   XCTAssertEqual(stateA.edit, 1U);
 
+  XCTAssertEqual(puglStopTextInput(viewA), PUGL_SUCCESS);
+  XCTAssertEqual(puglStopTextInput(viewA), PUGL_SUCCESS);
+  XCTAssertFalse(puglIsTextInputActive(viewA));
+  XCTAssertEqual(puglStartTextInput(viewA), PUGL_SUCCESS);
+  XCTAssertTrue(puglIsTextInputActive(viewA));
+
   XCTAssertEqual(puglGrabFocus(viewB), PUGL_SUCCESS);
   XCTAssertFalse(puglIsTextInputActive(viewA));
   XCTAssertEqual(stateA.focusOut, 1U);
   XCTAssertEqual(stateB.focusIn, 1U);
 
   XCTAssertEqual(puglStartTextInput(viewB), PUGL_SUCCESS);
+  XCTAssertEqual(puglStartTextInput(viewB), PUGL_SUCCESS);
   XCTAssertTrue(puglIsTextInputActive(viewB));
   XCTAssertEqual(stateB.focusIn, 1U);
   XCTAssertEqual(stateB.focusOut, 0U);
 
+  XCTAssertEqual(puglHide(viewA), PUGL_SUCCESS);
+  XCTAssertTrue(puglIsTextInputActive(viewB));
+  XCTAssertEqual(puglShow(viewA, PUGL_SHOW_PASSIVE), PUGL_SUCCESS);
   XCTAssertEqual(puglUnrealize(viewA), PUGL_SUCCESS);
   XCTAssertTrue(puglIsTextInputActive(viewB));
   puglFreeView(viewA);
