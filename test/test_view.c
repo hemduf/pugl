@@ -14,6 +14,17 @@
 #include <stdbool.h>
 #include <string.h>
 
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(PUGL_POINTER_CANCEL == 27, "Existing event ABI changed");
+_Static_assert(PUGL_TEXT_EDIT == 28, "Text edit event must be append-only");
+_Static_assert(sizeof(PuglTextEditEvent) <= sizeof(PuglEvent),
+               "Text edit event must not grow PuglEvent");
+#endif
+
 typedef enum {
   START,
   REALIZED,
@@ -73,6 +84,23 @@ main(int argc, char** argv)
   puglSetEventFunc(test.view, onEvent);
   puglSetSizeHint(test.view, PUGL_DEFAULT_SIZE, 256, 256);
   puglSetPositionHint(test.view, PUGL_DEFAULT_POSITION, 384, 640);
+
+  // Text input flags are portable common state throughout the view lifetime.
+  assert(!puglIsTextInputActive(test.view));
+  assert(!puglSetTextInputFlags(test.view, 0U));
+  assert(!puglSetTextInputFlags(test.view, PUGL_TEXT_INPUT_HAS_TEXT));
+  assert(puglSetTextInputFlags(test.view, PUGL_TEXT_INPUT_HAS_TEXT | (1U << 1U)) ==
+         PUGL_BAD_PARAMETER);
+
+  // Native text-input sessions are unsupported on all current platforms except
+  // iOS, where the pre-realization call must still fail because no responder
+  // hierarchy exists yet.
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+  assert(puglStartTextInput(test.view) != PUGL_SUCCESS);
+#else
+  assert(puglStartTextInput(test.view) == PUGL_UNSUPPORTED);
+  assert(puglStopTextInput(test.view) == PUGL_UNSUPPORTED);
+#endif
 
   // Check basic accessors
   assert(puglGetBackend(test.view) == puglStubBackend());
