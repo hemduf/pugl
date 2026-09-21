@@ -113,7 +113,10 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install build tools
-        run: python -m pip install "meson==${MESON_VERSION}" "ninja==${NINJA_VERSION}"
+        run: |
+          python -m pip install "meson==${MESON_VERSION}" "ninja==${NINJA_VERSION}"
+          brew install xcodegen
+          xcodegen --version
       - name: Create iOS cross file
         shell: bash
         run: |
@@ -163,6 +166,36 @@ jobs:
           -Dwerror=true
       - name: Build
         run: meson compile -C build-ios
+      - name: Generate iOS example project
+        run: xcodegen generate --spec examples/ios/project.yml
+      - name: Build standalone iOS example
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglStandalone \
+            -configuration Debug \
+            -sdk "${{ matrix.sdk }}" \
+            -derivedDataPath "build-ios-examples/${{ matrix.target }}/standalone" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Build AUv3 iOS example
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglAUv3Container \
+            -configuration Debug \
+            -sdk "${{ matrix.sdk }}" \
+            -derivedDataPath "build-ios-examples/${{ matrix.target }}/auv3" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
   windows:
     name: Windows
