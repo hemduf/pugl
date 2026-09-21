@@ -33,7 +33,10 @@ main(void)
   assert(event.pointer.pointerType == PUGL_POINTER_TOUCH);
   assert(event.pointer.pointerFlags & PUGL_POINTER_IS_PRIMARY);
   assert(fabs(event.pointer.pressure - 0.5) < 1e-12);
-  assert(sizeof(PuglPointerEvent) <= sizeof(PuglEvent));
+  // Adding raw pointer contacts must not enlarge the public event union.
+  // PuglScrollEvent was already one of the largest event payloads.
+  assert(sizeof(PuglPointerEvent) <= sizeof(PuglScrollEvent));
+  assert(sizeof(PuglEvent) >= sizeof(PuglPointerEvent));
 
   return 0;
 }
