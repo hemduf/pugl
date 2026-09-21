@@ -9,6 +9,13 @@
 
 #include <pugl/pugl.h>
 
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#  if TARGET_OS_IPHONE
+#    define PUGL_HAS_IOS_TEXT_INPUT 1
+#  endif
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -113,18 +120,18 @@ puglSetDefaultHints(PuglView* const view)
   view->hints[PUGL_RED_BITS]              = 8;
   view->hints[PUGL_GREEN_BITS]            = 8;
   view->hints[PUGL_BLUE_BITS]             = 8;
-  view->hints[PUGL_ALPHA_BITS]            = 8;
-  view->hints[PUGL_DEPTH_BITS]            = 0;
-  view->hints[PUGL_STENCIL_BITS]          = 0;
-  view->hints[PUGL_SAMPLE_BUFFERS]        = PUGL_DONT_CARE;
-  view->hints[PUGL_SAMPLES]               = 0;
-  view->hints[PUGL_DOUBLE_BUFFER]         = PUGL_TRUE;
-  view->hints[PUGL_SWAP_INTERVAL]         = PUGL_DONT_CARE;
-  view->hints[PUGL_RESIZABLE]             = PUGL_FALSE;
-  view->hints[PUGL_IGNORE_KEY_REPEAT]     = PUGL_FALSE;
-  view->hints[PUGL_REFRESH_RATE]          = PUGL_DONT_CARE;
-  view->hints[PUGL_VIEW_TYPE]             = PUGL_DONT_CARE;
-  view->hints[PUGL_ACCEPT_DROP]           = PUGL_DONT_CARE;
+  view->hints[PUGL_ALPHA_BITS]             = 8;
+  view->hints[PUGL_DEPTH_BITS]             = 0;
+  view->hints[PUGL_STENCIL_BITS]           = 0;
+  view->hints[PUGL_SAMPLE_BUFFERS]         = PUGL_DONT_CARE;
+  view->hints[PUGL_SAMPLES]                = 0;
+  view->hints[PUGL_DOUBLE_BUFFER]          = PUGL_TRUE;
+  view->hints[PUGL_SWAP_INTERVAL]          = PUGL_DONT_CARE;
+  view->hints[PUGL_RESIZABLE]              = PUGL_FALSE;
+  view->hints[PUGL_IGNORE_KEY_REPEAT]      = PUGL_FALSE;
+  view->hints[PUGL_REFRESH_RATE]           = PUGL_DONT_CARE;
+  view->hints[PUGL_VIEW_TYPE]              = PUGL_DONT_CARE;
+  view->hints[PUGL_ACCEPT_DROP]            = PUGL_DONT_CARE;
 
   for (unsigned i = 0U; i < PUGL_NUM_POSITION_HINTS; ++i) {
     view->positionHints[i].x = INT16_MIN;
@@ -290,6 +297,44 @@ puglGetViewString(const PuglView* const view, const PuglStringHint key)
 
   return view->strings[key];
 }
+
+PuglStatus
+puglSetTextInputFlags(PuglView* const view, const PuglTextInputFlags flags)
+{
+  if (!view) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  if (flags & ~(PuglTextInputFlags)PUGL_TEXT_INPUT_HAS_TEXT) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  view->textInputFlags = flags;
+  return PUGL_SUCCESS;
+}
+
+#ifndef PUGL_HAS_IOS_TEXT_INPUT
+PuglStatus
+puglStartTextInput(PuglView* const view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+PuglStatus
+puglStopTextInput(PuglView* const view)
+{
+  (void)view;
+  return PUGL_UNSUPPORTED;
+}
+
+bool
+puglIsTextInputActive(const PuglView* const view)
+{
+  (void)view;
+  return false;
+}
+#endif
 
 PuglPoint
 puglGetPositionHint(const PuglView* const view, const PuglPositionHint hint)
