@@ -26,6 +26,40 @@ These programs serve as demonstrations, and as utilities for manual testing.
  * `pugl_vulkan_cpp_demo` is a more advanced Vulkan demo in C++ that draws many
    animated rectangles like `pugl_shader_demo`.
 
-All example programs support several command line options to control various
+ * `pugl_wasm_demo` demonstrates the Emscripten/WebAssembly platform in a web
+   browser using the real WebGL backend.  It exercises keyboard and pointer
+   input, resize/configure events, redraw, and rendered pixel validation.
+
+Native example programs support several command line options to control various
 behaviours, see the output of `--help` for details.  Please file an issue if
 any of these programs do not work as expected on your system.
+
+WebAssembly Example
+-------------------
+
+The WebAssembly example is built only for Emscripten.  Activate the Emscripten
+SDK so its tools are available on `PATH`, then configure and build with:
+
+    meson setup build-wasm \
+      --cross-file build-aux/emscripten.ini \
+      -Dbindings_cpp=disabled \
+      -Dcairo=disabled \
+      -Ddocs=disabled \
+      -Dexamples=enabled \
+      -Dinstall=disabled \
+      -Dopengl=enabled \
+      -Dstub=true \
+      -Dtests=enabled \
+      -Dvulkan=disabled
+    meson compile -C build-wasm
+
+This produces `build-wasm/examples/pugl_wasm_demo.html` together with its
+JavaScript and WebAssembly payloads.  Serve the generated files over HTTP rather
+than opening the HTML through `file://`.  For example:
+
+    python3 -m http.server 8000 --directory build-wasm/examples
+
+Then open `http://localhost:8000/pugl_wasm_demo.html` in a browser.
+
+See `doc/emscripten.rst` for the complete browser platform contract and
+limitations.
