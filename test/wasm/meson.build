@@ -43,6 +43,16 @@ executable(
 )
 
 executable(
+  'pugl_wasm_multiview_focus',
+  'test_multiview_focus.c',
+  c_args: test_c_args,
+  dependencies: [pugl_dep, pugl_stub_dep],
+  install: false,
+  link_args: wasm_live_link_args,
+  name_suffix: 'html',
+)
+
+executable(
   'pugl_wasm_services',
   'test_services.c',
   'test_browser_semantics.c',

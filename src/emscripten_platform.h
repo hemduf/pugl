@@ -27,10 +27,6 @@ struct PuglInternalsImpl {
   double       pointerRootY;
   char         canvasSelector[48];
   bool         mapped;
-  // Effective view focus, decoupled from the hidden text input's own
-  // focus/blur transitions (the input briefly loses focus to its canvas on
-  // every click, which is not a view focus change).
-  bool         focused;
 };
 
 #endif // PUGL_SRC_EMSCRIPTEN_PLATFORM_H

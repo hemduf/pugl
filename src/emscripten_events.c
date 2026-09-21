@@ -203,6 +203,13 @@ EM_JS(int, puglBrowserInstallInput, (const char* selector, uintptr_t token), {
   handlers.pointerDown = (event) => {
     focusInput();
 
+    // The hidden textarea owns keyboard focus. Prevent the canvas pointer
+    // default action from immediately taking it back and synthesizing a
+    // spurious PUGL_FOCUS_OUT/PUGL_FOCUS_IN pair on every click.
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+
     if (typeof element.setPointerCapture === 'function') {
       try {
         element.setPointerCapture(event.pointerId);
@@ -358,10 +365,6 @@ EM_JS(int, puglBrowserFocus, (const char* selector), {
     input.focus();
   }
   return document.activeElement === input;
-});
-
-EM_JS(int, puglBrowserDocumentHasFocus, (), {
-  return typeof document !== 'undefined' && document.hasFocus();
 });
 
 EM_JS(int, puglBrowserHasFocus, (const char* selector), {
@@ -689,19 +692,13 @@ puglFocusCallback(const int                         eventType,
   (void)browserEvent;
 
   PuglView* const view = puglBindingView((PuglBrowserBinding*)userData);
-  if (!view || !view->impl) {
+  if (!view) {
     return false;
   }
-
-  const bool focused = eventType == EMSCRIPTEN_EVENT_FOCUS;
-  if (view->impl->focused == focused) {
-    // Only real window focus transitions are reported.
-    return false;
-  }
-  view->impl->focused = focused;
 
   PuglEvent event  = {0};
-  event.focus.type = focused ? PUGL_FOCUS_IN : PUGL_FOCUS_OUT;
+  event.focus.type = eventType == EMSCRIPTEN_EVENT_FOCUS ? PUGL_FOCUS_IN
+                                                          : PUGL_FOCUS_OUT;
   event.focus.mode = PUGL_CROSSING_NORMAL;
   return puglDispatchEvent(view, &event) == PUGL_SUCCESS;
 }
@@ -990,14 +987,10 @@ puglEmscriptenRegisterInput(PuglView* const view)
     inputSelector, binding, false, puglKeyCallback));
   REGISTER(emscripten_set_keyup_callback(
     inputSelector, binding, false, puglKeyCallback));
-  // View focus follows the browser window, not the hidden text input: the
-  // input transiently blurs to its own canvas (or the body) as the click's
-  // default action on every pointer press, which must not look like the view
-  // losing keyboard focus.
   REGISTER(emscripten_set_focus_callback(
-    EMSCRIPTEN_EVENT_TARGET_WINDOW, binding, false, puglFocusCallback));
+    inputSelector, binding, false, puglFocusCallback));
   REGISTER(emscripten_set_blur_callback(
-    EMSCRIPTEN_EVENT_TARGET_WINDOW, binding, false, puglFocusCallback));
+    inputSelector, binding, false, puglFocusCallback));
 
 #undef REGISTER
 
@@ -1026,9 +1019,9 @@ puglEmscriptenUnregisterInput(PuglView* const view)
   if (puglInputSelector(view, inputSelector)) {
     (void)emscripten_set_keydown_callback(inputSelector, NULL, false, NULL);
     (void)emscripten_set_keyup_callback(inputSelector, NULL, false, NULL);
+    (void)emscripten_set_focus_callback(inputSelector, NULL, false, NULL);
+    (void)emscripten_set_blur_callback(inputSelector, NULL, false, NULL);
   }
-  (void)emscripten_set_focus_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, false, NULL);
-  (void)emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, false, NULL);
 
   if (view->impl->canvasSelector[0]) {
     puglBrowserUninstallInput(view->impl->canvasSelector);
@@ -1067,23 +1060,3 @@ puglEmscriptenHasFocus(const PuglView* const view)
          puglBrowserHasFocus(view->impl->canvasSelector);
 }
 
-PuglStatus
-puglEmscriptenSyncFocus(PuglView* const view)
-{
-  if (!view || !view->impl) {
-    return PUGL_BAD_PARAMETER;
-  }
-
-  // A page that loads in an already-focused window never receives a window
-  // focus event, so a view shown at that moment must publish its initial
-  // focus state itself instead of staying silently inactive.
-  if (view->impl->focused || !puglBrowserDocumentHasFocus()) {
-    return PUGL_SUCCESS;
-  }
-
-  view->impl->focused = true;
-  PuglEvent event  = {0};
-  event.focus.type = PUGL_FOCUS_IN;
-  event.focus.mode = PUGL_CROSSING_NORMAL;
-  return puglDispatchEvent(view, &event);
-}

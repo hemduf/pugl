@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--passive", action="store_true")
     mode.add_argument("--pugl-input", action="store_true")
+    mode.add_argument("--pugl-multiview-focus", action="store_true")
     mode.add_argument("--demo", action="store_true")
     parser.add_argument("--clipboard", action="store_true")
     parser.add_argument(
@@ -117,6 +118,79 @@ def exercise_pugl_input(page: object) -> None:
         timeout=5000,
     )
 
+
+def exercise_pugl_multiview_focus(page: object) -> None:
+    inputs = page.locator("textarea[data-pugl-text-input]")
+    canvases = page.locator("canvas[id^='pugl-view-']")
+    if inputs.count() != 2 or canvases.count() != 2:
+        raise RuntimeError("Expected exactly two Pugl views and text inputs")
+
+    first_input = inputs.nth(0)
+    second_input = inputs.nth(1)
+    first_input.focus()
+    second_input.focus()
+
+    destroy_result = page.evaluate(
+        """
+        () => {
+          const destroy = Module && Module['_puglWasmMultiViewDestroySecond'];
+          if (typeof destroy !== 'function') {
+            throw new Error('Missing _puglWasmMultiViewDestroySecond export');
+          }
+          return destroy();
+        }
+        """
+    )
+    if destroy_result != 0:
+        raise RuntimeError(f"Second-view destroy returned {destroy_result}")
+
+    inputs = page.locator("textarea[data-pugl-text-input]")
+    canvases = page.locator("canvas[id^='pugl-view-']")
+    if inputs.count() != 1 or canvases.count() != 1:
+        raise RuntimeError("Destroying view B must leave view A intact")
+
+    first_input = inputs.first
+    first_input.focus()
+
+    box = canvases.first.bounding_box()
+    if not box:
+        raise RuntimeError("Remaining Pugl canvas has no bounding box")
+    x = box["x"] + (box["width"] / 2.0)
+    y = box["y"] + (box["height"] / 2.0)
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + 10.0, y + 6.0)
+    page.mouse.up()
+
+    still_focused = page.evaluate(
+        """
+        () => {
+          const input = document.querySelector('textarea[data-pugl-text-input]');
+          return !!input && document.activeElement === input;
+        }
+        """
+    )
+    if not still_focused:
+        raise RuntimeError("Pointer interaction stole the remaining view's keyboard focus")
+
+    finish_result = page.evaluate(
+        """
+        () => {
+          const finish = Module && Module['_puglWasmMultiViewFinish'];
+          if (typeof finish !== 'function') {
+            throw new Error('Missing _puglWasmMultiViewFinish export');
+          }
+          return finish();
+        }
+        """
+    )
+    if finish_result != 0:
+        raise RuntimeError(f"Multi-view finalizer returned {finish_result}")
+
+    page.wait_for_function(
+        "document.body && document.body.dataset.puglTest !== 'pending'",
+        timeout=5000,
+    )
 
 def exercise_demo(page: object) -> None:
     canvas = page.locator("canvas[id^='pugl-view-']")
@@ -223,6 +297,8 @@ def main() -> int:
 
                 if args.pugl_input:
                     exercise_pugl_input(page)
+                elif args.pugl_multiview_focus:
+                    exercise_pugl_multiview_focus(page)
                 elif args.demo:
                     exercise_demo(page)
                 elif not args.passive:
@@ -244,6 +320,8 @@ def main() -> int:
 
                 if args.pugl_input:
                     print("Pugl input browser test passed")
+                elif args.pugl_multiview_focus:
+                    print("Pugl multi-view focus browser test passed")
                 elif args.demo:
                     counts = page.evaluate("window.puglDemo")
                     print(f"Pugl browser demo passed: {counts}")

@@ -255,6 +255,12 @@ jobs:
           build-wasm/test/wasm/pugl_wasm_input.html
           --pugl-input
           --diagnostics-dir build-wasm/browser-diagnostics/input
+      - name: Run multi-view focus browser test
+        run: >-
+          python scripts/run_wasm_browser_test.py
+          build-wasm/test/wasm/pugl_wasm_multiview_focus.html
+          --pugl-multiview-focus
+          --diagnostics-dir build-wasm/browser-diagnostics/multiview-focus
       - name: Run services browser test
         run: >-
           python scripts/run_wasm_browser_test.py
