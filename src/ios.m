@@ -1280,9 +1280,25 @@ puglUnrealize(PuglView* const view)
     return PUGL_FAILURE;
   }
 
+  PuglWrapperView* const protectedWrapper = [view->impl->wrapperView retain];
   const PuglStatus textStatus = puglStopTextInput(view);
+
+  // Ending the text session can synchronously publish a focus-out on failure.
+  // The client may destroy or unrealize this view from that callback.
+  if (protectedWrapper->puglview != view) {
+    [protectedWrapper release];
+    return textStatus;
+  }
+
   const PuglStatus status = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
-  puglIosReleaseViewResources(view);
+
+  // The unrealize callback itself may also destroy the view.  The retained
+  // wrapper is a safe lifetime token whose back-pointer is cleared by teardown.
+  if (protectedWrapper->puglview == view) {
+    puglIosReleaseViewResources(view);
+  }
+
+  [protectedWrapper release];
   return status ? status : textStatus;
 }
 
@@ -1316,15 +1332,24 @@ puglHide(PuglView* view)
     return PUGL_FAILURE;
   }
 
+  PuglWrapperView* const protectedWrapper = [view->impl->wrapperView retain];
   const PuglStatus textStatus = puglStopTextInput(view);
 
-  view->impl->wrapperView.hidden = YES;
+  // A focus callback from puglStopTextInput() may synchronously destroy the
+  // view.  Do not dereference the PuglView after teardown has cleared this
+  // retained wrapper's non-owning back-pointer.
+  if (protectedWrapper->puglview != view) {
+    [protectedWrapper release];
+    return textStatus;
+  }
+
+  protectedWrapper.hidden = YES;
   if (view->impl->window) {
     view->impl->window.hidden = YES;
   }
 
-  const PuglStatus status =
-    [view->impl->wrapperView dispatchCurrentConfiguration];
+  const PuglStatus status = [protectedWrapper dispatchCurrentConfiguration];
+  [protectedWrapper release];
   return status ? status : textStatus;
 }
 
