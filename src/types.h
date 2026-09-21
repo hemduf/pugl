@@ -56,6 +56,7 @@ struct PuglViewImpl {
   PuglPoint          positionHints[PUGL_NUM_POSITION_HINTS];
   PuglArea           sizeHints[PUGL_NUM_SIZE_HINTS];
   char*              strings[PUGL_NUM_STRING_HINTS];
+  PuglTextInputFlags textInputFlags;
   PuglViewStage      stage;
   bool               resizing;
 };
