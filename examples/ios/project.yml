@@ -80,10 +80,6 @@ targets:
     platform: iOS
     sources:
       - path: Tests
-      - path: ../../src/common.c
-      - path: ../../src/internal.c
-      - path: ../../src/ios.m
-      - path: ../../src/ios_stub.m
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.standalone.tests
@@ -92,7 +88,7 @@ targets:
         GCC_PREPROCESSOR_DEFINITIONS:
           - "$(inherited)"
           - "PUGL_INTERNAL=1"
-          - "PUGL_OBJC_CLASS_PREFIX=PuglIOSTest"
+          - "PUGL_OBJC_CLASS_PREFIX=PuglStandaloneExample"
     dependencies:
       - target: PuglStandalone
       - sdk: Foundation.framework

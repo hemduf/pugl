@@ -14,9 +14,9 @@
 - (void)testRuntimeResponderTopologyUsesConsumerPrefix
 {
   XCTAssertEqualObjects(NSStringFromClass([PuglWrapperView class]),
-                        @"PuglIOSTestWrapperView");
+                        @"PuglStandaloneExampleWrapperView");
   XCTAssertEqualObjects(NSStringFromClass([PuglTextInputView class]),
-                        @"PuglIOSTestTextInputView");
+                        @"PuglStandaloneExampleTextInputView");
 
   XCTAssertFalse([PuglWrapperView conformsToProtocol:@protocol(UIKeyInput)]);
   XCTAssertTrue([PuglTextInputView conformsToProtocol:@protocol(UIKeyInput)]);
