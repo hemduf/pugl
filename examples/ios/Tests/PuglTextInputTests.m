@@ -21,6 +21,7 @@ typedef struct {
   uint32_t lastCharacter;
   uint32_t lastHardwareKeycode;
   PuglMods lastState;
+  bool startTextInputOnKeyPress;
   bool unrealizeOnText;
   bool freeOnText;
 } PuglIOSTestState;
@@ -133,6 +134,10 @@ puglIosTestEvent(PuglView* const view, const PuglEvent* const event)
   case PUGL_KEY_PRESS:
     ++state->keyPress;
     state->lastHardwareKeycode = event->key.keycode;
+    if (state->startTextInputOnKeyPress) {
+      state->startTextInputOnKeyPress = false;
+      (void)puglStartTextInput(view);
+    }
     break;
   case PUGL_KEY_RELEASE:
     ++state->keyRelease;
@@ -359,6 +364,43 @@ puglIosReleaseTestWindow(UIWindow* const window,
   XCTAssertEqual(state.lastKeycode, 0U);
   XCTAssertEqual(state.lastCharacter, (uint32_t)'a');
   XCTAssertEqual(state.lastState, 0U);
+
+  [press release];
+  [key release];
+  puglFreeView(view);
+  puglFreeWorld(world);
+  puglIosReleaseTestWindow(window, controller);
+}
+
+- (void)testKeyPressCallbackCanStartTextInputWithoutDuplicateCommittedText
+{
+  UIViewController* controller = nil;
+  UIWindow* const window = puglIosMakeTestWindow(&controller);
+  PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
+  XCTAssertNotEqual(world, NULL);
+
+  PuglIOSTestState state = {0U};
+  state.startTextInputOnKeyPress = true;
+  PuglView* const view = puglIosMakeTestView(world, controller.view, &state);
+  XCTAssertNotEqual(view, NULL);
+  XCTAssertEqual(puglGrabFocus(view), PUGL_SUCCESS);
+
+  PuglIOSTestKey* const key = [[PuglIOSTestKey alloc] init];
+  PuglIOSTestPress* const press = [[PuglIOSTestPress alloc] initWithKey:key];
+  NSSet* const presses = [NSSet setWithObject:(id)press];
+
+  [view->impl->wrapperView dispatchPresses:(NSSet<UIPress*>*)presses
+                                      type:PUGL_KEY_PRESS];
+
+  XCTAssertEqual(state.keyPress, 1U);
+  XCTAssertTrue(puglIsTextInputActive(view));
+  XCTAssertTrue(puglHasFocus(view));
+  XCTAssertEqual(state.text, 0U);
+
+  [view->impl->textInputView insertText:@"a"];
+  XCTAssertEqual(state.text, 1U);
+  XCTAssertEqual(state.lastKeycode, 0U);
+  XCTAssertEqual(state.lastCharacter, (uint32_t)'a');
 
   [press release];
   [key release];
