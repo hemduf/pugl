@@ -1,0 +1,109 @@
+# Copyright 2026 Pugl contributors
+# SPDX-License-Identifier: 0BSD OR ISC
+
+name: iOS text-input diagnostics
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-text-input-diagnostics-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lifecycle:
+    name: Lifecycle XCTest diagnostics
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Generate iOS example project
+        run: xcodegen generate --spec examples/ios/project.yml
+      - name: Select simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for xs in d.values() for x in xs if x["name"].startswith("iPhone") and x["isAvailable"]))')"
+          echo "PUGL_IOS_TEST_UDID=$udid" >> "$GITHUB_ENV"
+      - name: Build lifecycle tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglIOSTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$PUGL_IOS_TEST_UDID" \
+            -derivedDataPath build-ios-lifecycle-diagnostics \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing
+      - name: shared-host sibling isolation
+        if: always()
+        run: >-
+          xcodebuild -project examples/ios/PuglIOSExamples.xcodeproj
+          -scheme PuglIOSTests -configuration Debug -sdk iphonesimulator
+          -destination "platform=iOS Simulator,id=$PUGL_IOS_TEST_UDID"
+          -derivedDataPath build-ios-lifecycle-diagnostics ARCHS=arm64
+          ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          -only-testing:PuglIOSTests/PuglIOSTest45LifecycleTests/testSharedHostTeardownDoesNotAffectActiveSibling
+          test-without-building
+      - name: reentrant hide during start
+        if: always()
+        run: >-
+          xcodebuild -project examples/ios/PuglIOSExamples.xcodeproj
+          -scheme PuglIOSTests -configuration Debug -sdk iphonesimulator
+          -destination "platform=iOS Simulator,id=$PUGL_IOS_TEST_UDID"
+          -derivedDataPath build-ios-lifecycle-diagnostics ARCHS=arm64
+          ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          -only-testing:PuglIOSTests/PuglIOSTest45LifecycleTests/testReentrantHideDuringStartRecoversTransferState
+          test-without-building
+      - name: reentrant unrealize during start
+        if: always()
+        run: >-
+          xcodebuild -project examples/ios/PuglIOSExamples.xcodeproj
+          -scheme PuglIOSTests -configuration Debug -sdk iphonesimulator
+          -destination "platform=iOS Simulator,id=$PUGL_IOS_TEST_UDID"
+          -derivedDataPath build-ios-lifecycle-diagnostics ARCHS=arm64
+          ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          -only-testing:PuglIOSTests/PuglIOSTest45LifecycleTests/testReentrantUnrealizeDuringStartIsSafeAndReopenable
+          test-without-building
+      - name: reentrant free during start
+        if: always()
+        run: >-
+          xcodebuild -project examples/ios/PuglIOSExamples.xcodeproj
+          -scheme PuglIOSTests -configuration Debug -sdk iphonesimulator
+          -destination "platform=iOS Simulator,id=$PUGL_IOS_TEST_UDID"
+          -derivedDataPath build-ios-lifecycle-diagnostics ARCHS=arm64
+          ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          -only-testing:PuglIOSTests/PuglIOSTest45LifecycleTests/testReentrantFreeDuringStartDoesNotPoisonWorld
+          test-without-building
+      - name: repeated lifecycle loop
+        if: always()
+        run: >-
+          xcodebuild -project examples/ios/PuglIOSExamples.xcodeproj
+          -scheme PuglIOSTests -configuration Debug -sdk iphonesimulator
+          -destination "platform=iOS Simulator,id=$PUGL_IOS_TEST_UDID"
+          -derivedDataPath build-ios-lifecycle-diagnostics ARCHS=arm64
+          ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          -only-testing:PuglIOSTests/PuglIOSTest45LifecycleTests/testRepeatedCreateStartStopUnrealizeDestroy
+          test-without-building
+      - name: partial construction cleanup
+        if: always()
+        run: >-
+          xcodebuild -project examples/ios/PuglIOSExamples.xcodeproj
+          -scheme PuglIOSTests -configuration Debug -sdk iphonesimulator
+          -destination "platform=iOS Simulator,id=$PUGL_IOS_TEST_UDID"
+          -derivedDataPath build-ios-lifecycle-diagnostics ARCHS=arm64
+          ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          -only-testing:PuglIOSTests/PuglIOSTest45LifecycleTests/testPartialConstructionCleansNativeTextResources
+          test-without-building
