@@ -172,6 +172,14 @@ typedef struct {
 } PuglIOSTest45BackendState;
 
 static PuglStatus
+puglIosTest45FaultEvent(PuglView* const view, const PuglEvent* const event)
+{
+  (void)view;
+  (void)event;
+  return PUGL_SUCCESS;
+}
+
+static PuglStatus
 puglIosTest45Configure(PuglView* const view)
 {
   PuglIOSTest45BackendState* const state =
@@ -250,6 +258,7 @@ puglIosTest45PrepareFaultView(PuglWorld* const                 world,
 {
   PuglView* const view = puglNewView(world);
   if (!view || puglSetBackend(view, &puglIosTest45FaultBackend) ||
+      puglSetEventFunc(view, puglIosTest45FaultEvent) ||
       puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 320U, 180U) ||
       puglSetParent(view, (PuglNativeView)(uintptr_t)parent)) {
     if (view) {
@@ -324,28 +333,28 @@ puglIosTest45PrepareFaultView(PuglWorld* const                 world,
 
   const PuglStatus startStatus = puglStartTextInput(view);
   const bool activeAfterHide = puglIsTextInputActive(view);
+  const bool focusedAfterHide = puglHasFocus(view);
 
-  // A reentrant hide can race UIKit's responder resignation.  If UIKit keeps
-  // the text responder, Pugl must report that native truth instead of
-  // pretending the session ended.  Either outcome must leave the transfer
-  // transaction fully reconciled and the view logically hidden.
-  XCTAssertTrue(startStatus == PUGL_SUCCESS || startStatus == PUGL_FAILURE);
-  if (startStatus == PUGL_SUCCESS) {
-    XCTAssertTrue(activeAfterHide);
-  }
+  // Reentrant hide can race responder reconciliation.  Preserve UIKit truth:
+  // text input may remain active, focus may fall back to the wrapper, or both
+  // responders may resign.  The published logical focus must match whichever
+  // native responder actually owns focus after the transaction unwinds.
+  XCTAssertEqual(startStatus,
+                 activeAfterHide ? PUGL_SUCCESS : PUGL_FAILURE);
   XCTAssertFalse(puglGetVisible(view));
   XCTAssertFalse(view->impl->responderTransfer);
+  XCTAssertEqual(textInput.isFirstResponder, activeAfterHide);
+  XCTAssertEqual(state.focusOut, focusedAfterHide ? 0U : 1U);
 
-  if (activeAfterHide) {
-    XCTAssertTrue(puglHasFocus(view));
-    XCTAssertEqual(state.focusOut, 0U);
+  if (focusedAfterHide) {
+    XCTAssertTrue(activeAfterHide || view->impl->wrapperView.isFirstResponder);
   } else {
-    XCTAssertFalse(puglHasFocus(view));
-    XCTAssertEqual(state.focusOut, 1U);
+    XCTAssertFalse(activeAfterHide);
+    XCTAssertFalse(view->impl->wrapperView.isFirstResponder);
   }
 
   // Once the reentrant transition has unwound, ordinary lifecycle operations
-  // must remain usable regardless of whether UIKit accepted the first resign.
+  // must remain usable regardless of the responder outcome above.
   XCTAssertEqual(puglShow(view, PUGL_SHOW_PASSIVE), PUGL_SUCCESS);
   XCTAssertEqual(puglStopTextInput(view), PUGL_SUCCESS);
   XCTAssertFalse(puglIsTextInputActive(view));
