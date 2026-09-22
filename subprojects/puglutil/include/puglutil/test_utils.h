@@ -96,6 +96,25 @@ scrollDirectionString(const PuglScrollDirection direction)
 }
 
 static inline const char*
+pointerTypeString(const PuglPointerType type)
+{
+  switch (type) {
+  case PUGL_POINTER_UNKNOWN:
+    return "unknown";
+  case PUGL_POINTER_MOUSE:
+    return "mouse";
+  case PUGL_POINTER_TOUCH:
+    return "touch";
+  case PUGL_POINTER_PEN:
+    return "pen";
+  case PUGL_POINTER_ERASER:
+    return "eraser";
+  }
+
+  return "unknown";
+}
+
+static inline const char*
 viewStyleFlagString(const PuglViewStyleFlag state)
 {
   switch (state) {
@@ -337,6 +356,34 @@ printEvent(const PuglEvent* event, const char* prefix, const bool verbose)
                   event->scroll.x,
                   event->scroll.y) +
             printModifiers(event->scroll.state));
+  case PUGL_POINTER_DOWN:
+  case PUGL_POINTER_MOVE:
+  case PUGL_POINTER_UP:
+  case PUGL_POINTER_CANCEL: {
+    const char* const action =
+      event->type == PUGL_POINTER_DOWN
+        ? "down"
+        : (event->type == PUGL_POINTER_MOVE
+             ? "move"
+             : (event->type == PUGL_POINTER_UP ? "up" : "cancel"));
+    return PRINT("%sPointer %-6s id %u (%s) at " PFFMT
+                 " pressure %.3f size %.1fx%.1f%s%s\n",
+                 prefix,
+                 action,
+                 event->pointer.id,
+                 pointerTypeString(event->pointer.pointerType),
+                 event->pointer.x,
+                 event->pointer.y,
+                 event->pointer.pressure,
+                 event->pointer.width,
+                 event->pointer.height,
+                 (event->pointer.pointerFlags & PUGL_POINTER_IS_PRIMARY)
+                   ? " primary"
+                   : "",
+                 (event->pointer.pointerFlags & PUGL_POINTER_IS_COALESCED)
+                   ? " coalesced"
+                   : "");
+  }
   case PUGL_POINTER_IN:
     return PRINT("%sMouse enter  at " PFFMT " (%s)\n",
                  prefix,

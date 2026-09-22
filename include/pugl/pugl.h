@@ -91,6 +91,10 @@ typedef enum {
   PUGL_LOOP_LEAVE,     ///< Recursive loop left, a #PuglLoopLeaveEvent
   PUGL_DATA_OFFER,     ///< Data offered from clipboard, a #PuglDataOfferEvent
   PUGL_DATA,           ///< Data available from clipboard, a #PuglDataEvent
+  PUGL_POINTER_DOWN,   ///< Pointer contact began, a #PuglPointerEvent
+  PUGL_POINTER_MOVE,   ///< Pointer contact moved, a #PuglPointerEvent
+  PUGL_POINTER_UP,     ///< Pointer contact ended, a #PuglPointerEvent
+  PUGL_POINTER_CANCEL, ///< Pointer contact was cancelled, a #PuglPointerEvent
 } PuglEventType;
 
 /// Common flags for all event types
@@ -464,6 +468,67 @@ typedef enum {
 } PuglScrollDirection;
 
 /**
+   Stable identifier for an active pointer contact.
+
+   The identifier is unique among contacts that are active at the same time and
+   remains unchanged from #PUGL_POINTER_DOWN through #PUGL_POINTER_UP or
+   #PUGL_POINTER_CANCEL.  An identifier may be reused after a contact ends.
+*/
+typedef uint32_t PuglPointerId;
+
+/// Sentinel value that never identifies an active pointer contact
+#define PUGL_POINTER_ID_NONE ((PuglPointerId)0U)
+
+/// Physical source of a #PuglPointerEvent
+typedef enum {
+  PUGL_POINTER_UNKNOWN, ///< Unknown or unsupported pointer source
+  PUGL_POINTER_MOUSE,   ///< Mouse or mouse-like indirect pointer
+  PUGL_POINTER_TOUCH,   ///< Direct touch contact
+  PUGL_POINTER_PEN,     ///< Pen or stylus
+  PUGL_POINTER_ERASER,  ///< Eraser end of a pen, where supported
+} PuglPointerType;
+
+/// Flags that describe a #PuglPointerEvent sample
+typedef enum {
+  PUGL_POINTER_IS_PRIMARY   = 1U << 0U, ///< Primary contact in the sequence
+  PUGL_POINTER_IS_COALESCED = 1U << 1U, ///< Historical high-resolution sample
+  PUGL_POINTER_IS_PREDICTED = 1U << 2U, ///< Predicted future sample
+} PuglPointerFlag;
+
+/// Bitwise OR of #PuglPointerFlag values
+typedef uint32_t PuglPointerFlags;
+
+/**
+   Raw pointer contact event.
+
+   Unlike mouse button and motion events, this represents an independently
+   tracked contact and therefore supports true multi-pointer input.  Backends
+   emit one event per changed contact rather than allocating an array.
+
+   Pressure, width, and height are normalized/device-independent values where
+   possible.  Pressure is in the range [0, 1].  Width and height are in view
+   coordinate units.  A field is NAN when the platform does not provide that
+   information.
+
+   Gesture interpretation such as tap, pinch, rotate, or long-press is
+   intentionally left to higher-level toolkits.
+*/
+typedef struct {
+  PuglEventType     type;         ///< Down, move, up, or cancel
+  PuglEventFlags    flags;        ///< Bitwise OR of #PuglEventFlag values
+  double            time;         ///< Time in seconds
+  double            x;            ///< View-relative X coordinate
+  double            y;            ///< View-relative Y coordinate
+  PuglMods          state;        ///< Bitwise OR of #PuglMod flags
+  PuglPointerId     id;           ///< Stable contact identifier
+  PuglPointerType   pointerType;  ///< Physical source of this pointer
+  PuglPointerFlags  pointerFlags; ///< Bitwise OR of #PuglPointerFlag values
+  double            pressure;     ///< Normalized pressure in [0, 1], or NAN
+  double            width;        ///< Contact width, or NAN
+  double            height;       ///< Contact height, or NAN
+} PuglPointerEvent;
+
+/**
    Pointer enter or leave event.
 
    This is sent when the pointer enters or leaves the view.  This can happen
@@ -674,6 +739,7 @@ typedef union {
   PuglCrossingEvent  crossing;  ///< #PUGL_POINTER_IN, #PUGL_POINTER_OUT
   PuglMotionEvent    motion;    ///< #PUGL_MOTION
   PuglScrollEvent    scroll;    ///< #PUGL_SCROLL
+  PuglPointerEvent   pointer;   ///< #PUGL_POINTER_DOWN/MOVE/UP/CANCEL
   PuglFocusEvent     focus;     ///< #PUGL_FOCUS_IN, #PUGL_FOCUS_OUT
   PuglClientEvent    client;    ///< #PUGL_CLIENT
   PuglTimerEvent     timer;     ///< #PUGL_TIMER
@@ -828,6 +894,8 @@ puglGetWorldHandle(PuglWorld* world);
 
    MacOS: Returns a pointer to the `NSApplication`.
 
+   iOS: Returns a pointer to the `UIScreen` used by the world.
+
    Windows: Returns the `HMODULE` of the calling process.
 */
 PUGL_API void*
@@ -927,6 +995,8 @@ typedef struct PuglViewImpl PuglView;
    X11: This is a `Window`.
 
    MacOS: This is a pointer to an `NSView*`.
+
+   iOS: This is a pointer to a `UIView*`.
 
    Windows: This is a `HWND`.
 */

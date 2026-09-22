@@ -1,0 +1,132 @@
+name: PuglIOSExamples
+
+options:
+  bundleIdPrefix: net.drobilla.pugl.examples
+  deploymentTarget:
+    iOS: "14.0"
+
+settings:
+  base:
+    CLANG_ENABLE_MODULES: YES
+    CLANG_ENABLE_OBJC_ARC: NO
+    ENABLE_BITCODE: NO
+    GCC_C_LANGUAGE_STANDARD: c99
+    HEADER_SEARCH_PATHS:
+      - "$(SRCROOT)/../../include"
+      - "$(SRCROOT)/../../src"
+    OTHER_CFLAGS:
+      - "$(inherited)"
+      - "-Wno-deprecated-declarations"
+    SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+    SUPPORTS_MACCATALYST: NO
+    TARGETED_DEVICE_FAMILY: "1,2"
+
+targets:
+  PuglStandalone:
+    type: application
+    platform: iOS
+    sources:
+      - path: Standalone
+      - path: Shared
+      - path: ../../src/common.c
+      - path: ../../src/internal.c
+      - path: ../../src/ios.m
+      - path: ../../src/ios_stub.m
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.standalone
+        GCC_PREPROCESSOR_DEFINITIONS:
+          - "$(inherited)"
+          - "PUGL_INTERNAL=1"
+          - "PUGL_OBJC_CLASS_PREFIX=PuglStandaloneExample"
+    info:
+      path: Standalone/Info.plist
+      properties:
+        CFBundleDisplayName: Pugl Standalone
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - sdk: Foundation.framework
+      - sdk: QuartzCore.framework
+      - sdk: UIKit.framework
+
+  PuglAUv3Container:
+    type: application
+    platform: iOS
+    sources:
+      - path: AUv3Container
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.auv3.container
+    info:
+      path: AUv3Container/Info.plist
+      properties:
+        CFBundleDisplayName: Pugl AUv3
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - target: PuglAUv3Extension
+        embed: true
+
+  PuglAUv3Extension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: AUv3Extension
+      - path: Shared
+      - path: ../../src/common.c
+      - path: ../../src/internal.c
+      - path: ../../src/ios.m
+      - path: ../../src/ios_stub.m
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: YES
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.auv3.container.extension
+        SKIP_INSTALL: YES
+        GCC_PREPROCESSOR_DEFINITIONS:
+          - "$(inherited)"
+          - "PUGL_INTERNAL=1"
+          - "PUGL_OBJC_CLASS_PREFIX=PuglAUv3Example"
+    info:
+      path: AUv3Extension/Info.plist
+      properties:
+        CFBundleDisplayName: Pugl iOS Example
+        NSExtension:
+          NSExtensionAttributes:
+            AudioComponents:
+              - description: Pugl iOS AUv3 embedding example
+                manufacturer: Pugl
+                name: "Pugl: iOS Example"
+                sandboxSafe: true
+                subtype: Pugl
+                tags:
+                  - Effects
+                type: aufx
+                version: 1
+          NSExtensionPointIdentifier: com.apple.AudioUnit-UI
+          NSExtensionPrincipalClass: PuglExampleAudioUnitViewController
+    dependencies:
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreAudioKit.framework
+      - sdk: Foundation.framework
+      - sdk: QuartzCore.framework
+      - sdk: UIKit.framework
+
+schemes:
+  PuglStandalone:
+    build:
+      targets:
+        PuglStandalone: all
+
+  PuglAUv3Container:
+    build:
+      targets:
+        PuglAUv3Container: all

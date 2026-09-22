@@ -12,7 +12,12 @@
 
 #ifndef PUGL_NO_INCLUDE_GL_H
 #  ifdef __APPLE__
-#    include <OpenGL/gl.h> // IWYU pragma: export
+#    include <TargetConditionals.h>
+#    if TARGET_OS_IPHONE
+#      include <OpenGLES/ES3/gl.h> // IWYU pragma: export
+#    else
+#      include <OpenGL/gl.h> // IWYU pragma: export
+#    endif
 #  else
 #    ifdef _WIN32
 #      include <windows.h>

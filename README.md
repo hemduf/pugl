@@ -2,9 +2,9 @@ Pugl
 ====
 
 Pugl (PlUgin Graphics Library) is a minimal portability layer for GUIs which is
-suitable for use in plugins and applications.  It works on X11, MacOS, Windows,
-and WebAssembly/Emscripten, and includes optional support for drawing with
-Vulkan, OpenGL/WebGL, and Cairo where available.
+suitable for use in plugins and applications.  It works on X11, MacOS,
+iOS/iPadOS, Windows, and WebAssembly/Emscripten, and includes optional support
+for drawing with Vulkan, OpenGL/OpenGL ES/WebGL, and Cairo where available.
 
 Pugl is vaguely similar to libraries like GLUT and GLFW, but has different
 goals and priorities:
@@ -32,6 +32,31 @@ goals and priorities:
  * Small, liberally licensed implementation that is suitable for vendoring
    and/or static linking.  Pugl can be installed as a library, or used by
    simply copying the implementation into a project.
+
+iOS and iPadOS
+---------------
+
+The iOS port uses UIKit and is designed primarily for embedding in a
+host-provided `UIView`.  `puglGetNativeView()` returns that wrapper
+`UIView`, and `puglGetNativeWorld()` returns the world's default `UIScreen`.
+
+The initial iOS backend supports view lifecycle/configure/expose events,
+raw multi-touch pointer input with stable contact IDs, pressure/contact size,
+coalesced motion samples, hardware keyboard input, focus, timers, general
+clipboard operations, invalidation, and OpenGL ES 2/3 through
+`puglGlBackend()`.  Drag-and-drop, desktop cursor shapes, Cairo, and Vulkan are
+not provided by this backend.  A top-level `PUGL_PROGRAM` view is available as
+a lightweight `UIWindow`, but scene-managed applications and app extensions
+should embed a Pugl view in an application-owned `UIView`.
+
+iOS 14 or newer is the supported deployment baseline.
+
+Objective-C class names are process-global.  Plug-ins that statically embed
+Pugl and may coexist with another embedded copy must use a consumer-unique
+class prefix.  iOS Meson builds require
+`-Dios_objc_class_prefix=MyPluginPugl`; other build systems must define
+`PUGL_OBJC_CLASS_PREFIX` while compiling the iOS backend.  The iOS build
+fails if no prefix is provided.
 
 WebAssembly
 -----------

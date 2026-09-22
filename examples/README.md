@@ -1,5 +1,9 @@
 These programs serve as demonstrations, and as utilities for manual testing.
 
+ * `ios/` contains native iOS examples for a standalone application and an
+   Audio Unit v3 extension.  The Xcode project is generated from `ios/project.yml`
+   and both examples are compiled by the iOS CI jobs.
+
  * `pugl_embed_demo` shows a view embedded in another, and also tests
    requesting attention (which happens after 5 seconds), keyboard focus
    (switched by pressing tab), view moving (with the arrow keys), and view

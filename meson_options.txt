@@ -6,6 +6,10 @@ option('cairo', type: 'feature', description: 'Enable Cairo graphics backend')
 option('docs', type: 'feature', description: 'Build documentation')
 option('examples', type: 'feature', description: 'Build example programs')
 option('install', type: 'feature', description: 'Install project')
+option('ios_objc_class_prefix',
+       type: 'string',
+       value: '',
+       description: 'Required consumer-unique Objective-C class prefix for the iOS backend')
 option('lint', type: 'boolean', value: false, description: 'Run project tests')
 option('opengl', type: 'feature', description: 'Enable OpenGL graphics backend')
 option('stub', type: 'boolean', description: 'Build stub backend')

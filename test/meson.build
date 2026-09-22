@@ -27,6 +27,7 @@ basic_exclusive_tests = []
 
 basic_tests = [
   'bad_call',
+  'pointer',
   'cursor',
   'realize',
   'redisplay',
