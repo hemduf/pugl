@@ -213,6 +213,96 @@ jobs:
             ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
             test
+      - name: Diagnose core text-input XCTest suite
+        if: matrix.target == 'simulator' && failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for xs in d.values() for x in xs if x["name"].startswith("iPhone") and x["isAvailable"]))')"
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglIOSTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath "build-ios-examples/simulator/tests" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:PuglIOSTests/PuglTextInputTests \
+            test-without-building
+      - name: Diagnose lifecycle XCTest suite
+        if: matrix.target == 'simulator' && failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for xs in d.values() for x in xs if x["name"].startswith("iPhone") and x["isAvailable"]))')"
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglIOSTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath "build-ios-examples/simulator/tests" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:PuglIOSTests/PuglIOSTest45LifecycleTests \
+            test-without-building
+      - name: Diagnose stop-path XCTest suite
+        if: matrix.target == 'simulator' && failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for xs in d.values() for x in xs if x["name"].startswith("iPhone") and x["isAvailable"]))')"
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglIOSTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath "build-ios-examples/simulator/tests" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:PuglIOSTests/PuglIOSTestTextInputStopTests \
+            test-without-building
+      - name: Diagnose runtime-prefix XCTest suite
+        if: matrix.target == 'simulator' && failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for xs in d.values() for x in xs if x["name"].startswith("iPhone") and x["isAvailable"]))')"
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglIOSTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath "build-ios-examples/simulator/tests" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:PuglIOSTests/PuglIOSTestTextInputPrefixTests \
+            test-without-building
+      - name: Diagnose C++ wrapper XCTest suite
+        if: matrix.target == 'simulator' && failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for xs in d.values() for x in xs if x["name"].startswith("iPhone") and x["isAvailable"]))')"
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglIOSTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath "build-ios-examples/simulator/tests" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:PuglIOSTests/PuglIOSTestTextInputCppTests \
+            test-without-building
 
   windows:
     name: Windows
