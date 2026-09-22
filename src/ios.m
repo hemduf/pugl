@@ -285,7 +285,7 @@ puglIosDispatchHardwareText(PuglWrapperView* const wrapper,
   NSString* const text = key.characters;
   for (NSUInteger i = 0U; i < text.length;) {
     PuglView* const view = wrapper->puglview;
-    if (!view) {
+    if (!view || !wrapper.isFirstResponder || puglIsTextInputActive(view)) {
       break;
     }
 
@@ -859,7 +859,8 @@ puglIosIsMouseTouch(UITouch* const touch)
     const PuglMods state = puglIosModifiers(key.modifierFlags);
     puglIosDispatchHardwareKey(view, key, type);
 
-    if (type == PUGL_KEY_PRESS && protectedSelf->puglview == view) {
+    if (type == PUGL_KEY_PRESS && protectedSelf->puglview == view &&
+        protectedSelf.isFirstResponder && !puglIsTextInputActive(view)) {
       puglIosDispatchHardwareText(protectedSelf, key, state);
     }
   }
