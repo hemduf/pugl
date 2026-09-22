@@ -75,6 +75,29 @@ targets:
       - target: PuglAUv3Extension
         embed: true
 
+  PuglIOSTestHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: TestHost
+      - path: ../../src/common.c
+      - path: ../../src/internal.c
+      - path: ../../src/ios.m
+      - path: ../../src/ios_stub.m
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.tests.host
+        GENERATE_INFOPLIST_FILE: YES
+        DEAD_CODE_STRIPPING: NO
+        GCC_PREPROCESSOR_DEFINITIONS:
+          - "$(inherited)"
+          - "PUGL_INTERNAL=1"
+          - "PUGL_OBJC_CLASS_PREFIX=PuglIOSTest"
+    dependencies:
+      - sdk: Foundation.framework
+      - sdk: QuartzCore.framework
+      - sdk: UIKit.framework
+
   PuglIOSTests:
     type: bundle.unit-test
     platform: iOS
@@ -82,15 +105,15 @@ targets:
       - path: Tests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.standalone.tests
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PuglStandalone.app/PuglStandalone"
+        PRODUCT_BUNDLE_IDENTIFIER: net.drobilla.pugl.examples.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PuglIOSTestHost.app/PuglIOSTestHost"
         BUNDLE_LOADER: "$(TEST_HOST)"
         GCC_PREPROCESSOR_DEFINITIONS:
           - "$(inherited)"
           - "PUGL_INTERNAL=1"
-          - "PUGL_OBJC_CLASS_PREFIX=PuglStandaloneExample"
+          - "PUGL_OBJC_CLASS_PREFIX=PuglIOSTest"
     dependencies:
-      - target: PuglStandalone
+      - target: PuglIOSTestHost
       - sdk: Foundation.framework
       - sdk: QuartzCore.framework
       - sdk: UIKit.framework
@@ -151,7 +174,6 @@ schemes:
     build:
       targets:
         PuglAUv3Container: all
-
 
   PuglIOSTests:
     build:
