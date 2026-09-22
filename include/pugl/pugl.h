@@ -1653,8 +1653,9 @@ puglStopTextInput(PuglView* view);
 /**
    Return whether a native text-input session is currently active.
 
-   This reflects the native session state, not software-keyboard visibility.
-   It is false on backends without native text-input session support.
+   This must be called from the UI thread.  It reflects the native session
+   state, not software-keyboard visibility.  It is false on backends without
+   native text-input session support.
 */
 PUGL_API bool
 puglIsTextInputActive(const PuglView* view);
