@@ -1628,24 +1628,42 @@ puglHasFocus(const PuglView* view);
 /**
    Start a native text-input session for an already-focused view.
 
-   This does not acquire logical keyboard focus. Unsupported backends return
-   #PUGL_UNSUPPORTED.
+   This must be called from the UI thread on a realized, mapped, and already
+   logically focused view.  It is idempotent and does not acquire logical
+   keyboard focus.
+
+   An active text-input session means that the native text input mechanism owns
+   text entry for the view.  It does not imply that a software keyboard is
+   currently visible.
+
+   Unsupported backends return #PUGL_UNSUPPORTED.
 */
 PUGL_API PuglStatus
 puglStartTextInput(PuglView* view);
 
-/// Stop the native text-input session for a view, if active
+/**
+   Stop the native text-input session for a view, if active.
+
+   This must be called from the UI thread.  It is idempotent on backends that
+   support native text input.  Unsupported backends return #PUGL_UNSUPPORTED.
+*/
 PUGL_API PuglStatus
 puglStopTextInput(PuglView* view);
 
-/// Return whether a native text-input session is currently active
+/**
+   Return whether a native text-input session is currently active.
+
+   This reflects the native session state, not software-keyboard visibility.
+   It is false on backends without native text-input session support.
+*/
 PUGL_API bool
 puglIsTextInputActive(const PuglView* view);
 
 /**
    Set portable text-input state published by the application.
 
-   This may be called before realization and after unrealization. Unknown flag
+   This must be called from the UI thread.  It may be called for any allocated
+   view, including before realization and after unrealization.  Unknown flag
    bits return #PUGL_BAD_PARAMETER.
 */
 PUGL_API PuglStatus
