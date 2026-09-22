@@ -927,7 +927,8 @@ puglIosIsMouseTouch(UITouch* const touch)
 
   for (NSUInteger i = 0U; text && i < text.length;) {
     PuglView* const view = protectedSelf->puglview;
-    if (!view || view->stage < PUGL_VIEW_STAGE_REALIZED) {
+    if (!view || view->stage < PUGL_VIEW_STAGE_REALIZED ||
+        !protectedSelf.isFirstResponder) {
       break;
     }
 
