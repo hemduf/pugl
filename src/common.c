@@ -226,6 +226,18 @@ puglGetBackend(const PuglView* view)
 }
 
 PuglStatus
+puglSetTextInputFlags(PuglView* const view, const PuglTextInputFlags flags)
+{
+  const PuglTextInputFlags knownFlags = PUGL_TEXT_INPUT_HAS_TEXT;
+  if (!view || (flags & ~knownFlags)) {
+    return PUGL_BAD_PARAMETER;
+  }
+
+  view->textInputFlags = flags;
+  return PUGL_SUCCESS;
+}
+
+PuglStatus
 puglSetEventFunc(PuglView* view, PuglEventFunc eventFunc)
 {
   view->eventFunc = eventFunc;

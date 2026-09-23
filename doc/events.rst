@@ -98,3 +98,27 @@ pinch, or rotation is intentionally left to higher-level toolkits.
 
 A cancelled contact must not be treated as a normal release.  Applications
 should discard any transient interaction state associated with that pointer ID.
+
+
+Text Input
+==========
+
+Physical keyboard input and text editing are separate concepts.
+
+:struct:`PuglKeyEvent` represents physical key transitions and should be used
+for shortcuts or direct key handling.  :struct:`PuglTextEvent` represents
+committed Unicode text and may have no corresponding physical key code.
+
+Applications that want native text entry explicitly start a text-input session
+with :func:`puglStartTextInput` after the view already has logical keyboard
+focus.  :func:`puglStopTextInput` ends that session without requiring an
+application to synthesize focus changes.
+
+:enumerator:`PUGL_TEXT_EDIT <PuglEventType.PUGL_TEXT_EDIT>` represents
+semantic editing operations such as backward deletion.  It is intentionally
+not a hardware key event: the application owns document, selection, and
+grapheme semantics.
+
+The Phase 1 text-input API only represents committed text and simple semantic
+editing.  Marked/composition text and full IME document queries require a
+separate bidirectional text-document contract.

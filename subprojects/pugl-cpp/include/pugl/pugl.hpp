@@ -197,6 +197,12 @@ using KeyReleaseEvent = Event<PUGL_KEY_RELEASE, PuglKeyEvent>;
 /// @copydoc PuglTextEvent
 using TextEvent = Event<PUGL_TEXT, PuglTextEvent>;
 
+/// @copydoc PuglTextEditType
+using TextEditType = PuglTextEditType;
+
+/// @copydoc PuglTextEditEvent
+using TextEditEvent = Event<PUGL_TEXT_EDIT, PuglTextEditEvent>;
+
 /// @copydoc PuglCrossingEvent
 using PointerInEvent = Event<PUGL_POINTER_IN, PuglCrossingEvent>;
 
@@ -464,6 +470,12 @@ static_assert(static_cast<ViewHint>(PUGL_DARK_FRAME) == ViewHint::darkFrame);
 /// @copydoc PuglViewHintValue
 using ViewHintValue = PuglViewHintValue;
 
+/// @copydoc PuglTextInputFlag
+using TextInputFlag = PuglTextInputFlag;
+
+/// @copydoc PuglTextInputFlags
+using TextInputFlags = PuglTextInputFlags;
+
 /// @copydoc PuglCursor
 enum class Cursor {
   arrow,           ///< @copydoc PUGL_CURSOR_ARROW
@@ -718,6 +730,30 @@ public:
   /// @copydoc puglHasFocus
   bool hasFocus() const noexcept { return puglHasFocus(cobj()); }
 
+  /// @copydoc puglStartTextInput
+  Status startTextInput() noexcept
+  {
+    return static_cast<Status>(puglStartTextInput(cobj()));
+  }
+
+  /// @copydoc puglStopTextInput
+  Status stopTextInput() noexcept
+  {
+    return static_cast<Status>(puglStopTextInput(cobj()));
+  }
+
+  /// @copydoc puglIsTextInputActive
+  bool isTextInputActive() const noexcept
+  {
+    return puglIsTextInputActive(cobj());
+  }
+
+  /// @copydoc puglSetTextInputFlags
+  Status setTextInputFlags(const TextInputFlags flags) noexcept
+  {
+    return static_cast<Status>(puglSetTextInputFlags(cobj(), flags));
+  }
+
   /// @copydoc puglPaste
   Status paste() noexcept { return static_cast<Status>(puglPaste(cobj())); }
 
@@ -929,6 +965,8 @@ private:
       return target.onEvent(KeyReleaseEvent{event->key});
     case PUGL_TEXT:
       return target.onEvent(TextEvent{event->text});
+    case PUGL_TEXT_EDIT:
+      return target.onEvent(TextEditEvent{event->textEdit});
     case PUGL_POINTER_IN:
       return target.onEvent(PointerInEvent{event->crossing});
     case PUGL_POINTER_OUT:

@@ -34,8 +34,9 @@ Select the **PuglStandalone** scheme and run it on an iPhone/iPad simulator or
 device.
 
 The sample creates a `PUGL_PROGRAM` world, shows a top-level Pugl view, and
-prints lifecycle/input state in the view.  Touching the view requests Pugl
-keyboard focus so a connected hardware keyboard can be exercised.
+prints lifecycle/input state in the view.  Touching the view toggles Pugl's explicit text-input session.  The first tap
+requests logical focus and starts text input; a later tap stops it.  This can
+be used with the software keyboard or a connected hardware keyboard.
 
 ## AUv3
 
@@ -44,7 +45,8 @@ Build/run **PuglAUv3Container** once to install the extension, then instantiate
 
 Each `PuglExampleAudioUnitViewController` owns an independent
 `PUGL_MODULE` world and embeds its Pugl view into the host-provided
-`UIView`.  No `UIApplication` ownership or process-global editor/view state
+`UIView`.  Touching that embedded view toggles its per-instance text-input
+session.  No `UIApplication` ownership or process-global editor/view state
 is used.
 
 The audio unit is a minimal stereo pass-through effect.  Its render block only

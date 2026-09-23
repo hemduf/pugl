@@ -196,6 +196,23 @@ jobs:
             ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Run iOS text-input tests
+        if: matrix.target == 'simulator'
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for xs in d.values() for x in xs if x["name"].startswith("iPhone") and x["isAvailable"]))')"
+          xcodebuild \
+            -project examples/ios/PuglIOSExamples.xcodeproj \
+            -scheme PuglIOSTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath "build-ios-examples/simulator/tests" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            test
 
   windows:
     name: Windows
