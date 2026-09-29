@@ -1292,15 +1292,13 @@ puglUnrealize(PuglView* const view)
     return textStatus;
   }
 
-  const PuglStatus status = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
-
-  // The unrealize callback itself may also destroy the view.  The retained
-  // wrapper is a safe lifetime token whose back-pointer is cleared by teardown.
-  if (protectedWrapper->puglview == view) {
-    puglIosReleaseViewResources(view);
-  }
-
   [protectedWrapper release];
+
+  // The common PUGL_UNREALIZE dispatcher completes backend leave and stage
+  // bookkeeping after the client callback returns.  Do not treat the retained
+  // native wrapper as a PuglView lifetime token across that callback.
+  const PuglStatus status = puglDispatchSimpleEvent(view, PUGL_UNREALIZE);
+  puglIosReleaseViewResources(view);
   return status ? status : textStatus;
 }
 
