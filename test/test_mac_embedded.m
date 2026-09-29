@@ -43,6 +43,23 @@ typedef struct {
   unsigned buttonPresses;
 } TestState;
 
+typedef enum {
+  CALLBACK_NONE,
+  CALLBACK_HIDE_ON_MAPPED_CONFIGURE,
+  CALLBACK_FREE_ON_CONFIGURE,
+  CALLBACK_FREE_ON_FOCUS_IN,
+  CALLBACK_FREE_ON_FOCUS_OUT,
+} CallbackAction;
+
+typedef struct {
+  PuglView*      view;
+  CallbackAction action;
+  unsigned       configures;
+  unsigned       focusIn;
+  unsigned       focusOut;
+  unsigned       buttonPresses;
+} CallbackState;
+
 static PuglStatus
 onEvent(PuglView* const view, const PuglEvent* const event)
 {
@@ -66,6 +83,72 @@ onEvent(PuglView* const view, const PuglEvent* const event)
   }
 
   return PUGL_SUCCESS;
+}
+
+static PuglStatus
+onCallbackEvent(PuglView* const view, const PuglEvent* const event)
+{
+  CallbackState* const state = (CallbackState*)puglGetHandle(view);
+
+  switch (event->type) {
+  case PUGL_CONFIGURE:
+    ++state->configures;
+    if (state->action == CALLBACK_HIDE_ON_MAPPED_CONFIGURE &&
+        (event->configure.style & PUGL_VIEW_STYLE_MAPPED)) {
+      state->action = CALLBACK_NONE;
+      assert(!puglHide(view));
+    } else if (state->action == CALLBACK_FREE_ON_CONFIGURE) {
+      state->action = CALLBACK_NONE;
+      state->view   = NULL;
+      puglFreeView(view);
+    }
+    break;
+
+  case PUGL_FOCUS_IN:
+    ++state->focusIn;
+    if (state->action == CALLBACK_FREE_ON_FOCUS_IN) {
+      state->action = CALLBACK_NONE;
+      state->view   = NULL;
+      puglFreeView(view);
+    }
+    break;
+
+  case PUGL_FOCUS_OUT:
+    ++state->focusOut;
+    if (state->action == CALLBACK_FREE_ON_FOCUS_OUT) {
+      state->action = CALLBACK_NONE;
+      state->view   = NULL;
+      puglFreeView(view);
+    }
+    break;
+
+  case PUGL_BUTTON_PRESS:
+    ++state->buttonPresses;
+    break;
+
+  default:
+    break;
+  }
+
+  return PUGL_SUCCESS;
+}
+
+static PuglView*
+newEmbeddedView(PuglWorld* const world,
+                NSView* const    parent,
+                void* const      handle,
+                PuglEventFunc    eventFunc)
+{
+  PuglView* const view = puglNewView(world);
+  assert(view);
+
+  assert(!puglSetBackend(view, puglStubBackend()));
+  puglSetHandle(view, handle);
+  assert(!puglSetEventFunc(view, eventFunc));
+  assert(!puglSetParent(view, (PuglNativeView)parent));
+  assert(!puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 160U, 100U));
+
+  return view;
 }
 
 static NSEvent*
@@ -211,6 +294,77 @@ main(void)
   puglFreeView(view);
   assert(state.focusOut == 2U);
   assert([host isVisible]);
+  assert([host contentView] == parent);
+
+  // A configure callback may synchronously hide again; the nested transition
+  // must win instead of being overwritten by the outer show.
+  CallbackState reentrant = {
+    NULL, CALLBACK_HIDE_ON_MAPPED_CONFIGURE, 0U, 0U, 0U, 0U};
+  PuglView* const reentrantView =
+    newEmbeddedView(world, parent, &reentrant, onCallbackEvent);
+  reentrant.view = reentrantView;
+  assert(!puglRealize(reentrantView));
+
+  NSView* const reentrantNative = (NSView*)puglGetNativeView(reentrantView);
+  assert(reentrantNative);
+  assert(!puglShow(reentrantView, PUGL_SHOW_PASSIVE));
+  assert(reentrant.view == reentrantView);
+  assert(reentrant.configures == 2U);
+  assert([reentrantNative isHidden]);
+  assert(!puglGetVisible(reentrantView));
+  puglFreeView(reentrantView);
+
+  // A configure callback may destroy the view.  The child dispatcher commits
+  // state before the callback and does not dereference the view afterwards.
+  CallbackState freeOnConfigure = {
+    NULL, CALLBACK_FREE_ON_CONFIGURE, 0U, 0U, 0U, 0U};
+  PuglView* configureView =
+    newEmbeddedView(world, parent, &freeOnConfigure, onCallbackEvent);
+  freeOnConfigure.view = configureView;
+  assert(!puglRealize(configureView));
+  assert(!puglShow(configureView, PUGL_SHOW_PASSIVE));
+  assert(freeOnConfigure.view == NULL);
+  assert(freeOnConfigure.configures == 1U);
+  assert([host contentView] == parent);
+
+  // A focus callback may destroy the view before mouseDown can dispatch the
+  // button event.  Native wrapper lifetime must remain valid while unwinding.
+  CallbackState freeOnFocusIn = {
+    NULL, CALLBACK_FREE_ON_FOCUS_IN, 0U, 0U, 0U, 0U};
+  PuglView* focusInView =
+    newEmbeddedView(world, parent, &freeOnFocusIn, onCallbackEvent);
+  freeOnFocusIn.view = focusInView;
+  assert(!puglRealize(focusInView));
+  assert(!puglShow(focusInView, PUGL_SHOW_PASSIVE));
+
+  NSView* const focusInNative = (NSView*)puglGetNativeView(focusInView);
+  assert(focusInNative);
+  [(id)focusInNative mouseDown:mouseDownEvent(host)];
+  assert(freeOnFocusIn.view == NULL);
+  assert(freeOnFocusIn.focusIn == 1U);
+  assert(freeOnFocusIn.buttonPresses == 0U);
+  assert([host contentView] == parent);
+
+  // Hiding a focused child may destroy it from FOCUS_OUT.  Nothing after that
+  // callback may dereference the Pugl view or released native wrapper.
+  CallbackState freeOnFocusOut = {
+    NULL, CALLBACK_NONE, 0U, 0U, 0U, 0U};
+  PuglView* focusOutView =
+    newEmbeddedView(world, parent, &freeOnFocusOut, onCallbackEvent);
+  freeOnFocusOut.view = focusOutView;
+  assert(!puglRealize(focusOutView));
+  assert(!puglShow(focusOutView, PUGL_SHOW_PASSIVE));
+
+  NSView* const focusOutNative = (NSView*)puglGetNativeView(focusOutView);
+  assert(focusOutNative);
+  [(id)focusOutNative mouseDown:mouseDownEvent(host)];
+  assert(freeOnFocusOut.focusIn == 1U);
+  assert(freeOnFocusOut.buttonPresses == 1U);
+
+  freeOnFocusOut.action = CALLBACK_FREE_ON_FOCUS_OUT;
+  assert(!puglHide(focusOutView));
+  assert(freeOnFocusOut.view == NULL);
+  assert(freeOnFocusOut.focusOut == 1U);
   assert([host contentView] == parent);
 
   puglFreeWorld(world);

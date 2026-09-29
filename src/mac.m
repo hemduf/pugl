@@ -209,7 +209,14 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
   PuglEvent configureEvent;
   configureEvent.configure = ev;
 
-  return puglDispatchEvent(view, &configureEvent);
+  // Commit native-derived state before user code so a reentrant show/hide sees
+  // the current state, and do not touch the view after the callback returns.
+  view->lastConfigure = ev;
+  if (view->stage == PUGL_VIEW_STAGE_REALIZED) {
+    view->stage = PUGL_VIEW_STAGE_CONFIGURED;
+  }
+
+  return view->eventFunc(view, &configureEvent);
 }
 
 @implementation PuglWindow {
@@ -834,12 +841,13 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
     [self retain];
     [[self window] makeFirstResponder:self];
 
-    const bool viewIsAlive =
+    const bool viewCanReceiveInput =
       puglview == view && puglview && puglview->impl &&
-      puglview->impl->wrapperView == self;
+      puglview->impl->wrapperView == self &&
+      ![self isHiddenOrHasHiddenAncestor];
     [self release];
 
-    if (!viewIsAlive) {
+    if (!viewCanReceiveInput) {
       return;
     }
   }
@@ -1710,16 +1718,32 @@ puglHide(PuglView* view)
     PuglWrapperView* const wrapper = impl->wrapperView;
 
     if (wrapper && ![wrapper isHidden]) {
+      [wrapper retain];
       [wrapper setHidden:YES];
 
-      // Publish the hidden state before releasing focus, since the focus
-      // callback may synchronously destroy or unrealize the view.
+      // Publish the hidden state before releasing focus.  Configuration and
+      // focus callbacks may synchronously destroy, unrealize, or re-show this
+      // view, so keep the native object alive and revalidate before continuing.
       (void)dispatchCurrentChildViewConfiguration(view);
-    }
 
-    NSWindow* const window = [wrapper window];
-    if ([window firstResponder] == wrapper) {
-      [window makeFirstResponder:nil];
+      PuglView* const liveView = wrapper->puglview;
+      const bool viewStillHidden =
+        liveView == view && liveView && liveView->impl &&
+        liveView->impl->wrapperView == wrapper && [wrapper isHidden];
+
+      if (viewStillHidden) {
+        NSWindow* const window = [wrapper window];
+        if ([window firstResponder] == wrapper) {
+          [window makeFirstResponder:nil];
+        }
+      }
+
+      [wrapper release];
+    } else {
+      NSWindow* const window = [wrapper window];
+      if ([window firstResponder] == wrapper) {
+        [window makeFirstResponder:nil];
+      }
     }
   } else {
     [impl->window setIsVisible:NO];
