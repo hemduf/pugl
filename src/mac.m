@@ -165,7 +165,11 @@ getCurrentViewStyleFlags(PuglView* const view)
   const bool isResizing = view->resizing;
 
   if (!view->impl->window) {
-    return (isResizing ? PUGL_VIEW_STYLE_RESIZING : 0U);
+    const bool isMapped =
+      view->impl->wrapperView && ![view->impl->wrapperView isHidden];
+
+    return (isMapped ? PUGL_VIEW_STYLE_MAPPED : 0U) |
+           (isResizing ? PUGL_VIEW_STYLE_RESIZING : 0U);
   }
 
   const NSWindowStyleMask styleMask = [view->impl->window styleMask];
@@ -381,42 +385,48 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
 
 - (void)viewWillMoveToWindow:(NSWindow*)newWindow
 {
-  if (observedWindow) {
+  NSWindow* const previousWindow =
+    observedWindow != newWindow ? observedWindow : nil;
+
+  if (previousWindow) {
     NSNotificationCenter* const center = [NSNotificationCenter defaultCenter];
     [center removeObserver:self
                       name:NSWindowDidBecomeKeyNotification
-                    object:observedWindow];
+                    object:previousWindow];
     [center removeObserver:self
                       name:NSWindowDidResignKeyNotification
-                    object:observedWindow];
-
-    if ([observedWindow firstResponder] == self) {
-      [observedWindow makeFirstResponder:nil];
-    }
-
+                    object:previousWindow];
     observedWindow = nil;
-    [self puglSetEmbeddedFocus:NO];
   }
 
   [super viewWillMoveToWindow:newWindow];
+
+  if (previousWindow) {
+    if ([previousWindow firstResponder] == self) {
+      [previousWindow makeFirstResponder:nil];
+    } else {
+      [self puglSetEmbeddedFocus:NO];
+    }
+  }
 }
 
 - (void)viewDidMoveToWindow
 {
   [super viewDidMoveToWindow];
 
-  if (puglview && puglview->parent && [self window]) {
-    observedWindow = [self window];
+  NSWindow* const window = [self window];
+  if (puglview && puglview->parent && window && observedWindow != window) {
+    observedWindow = window;
 
     NSNotificationCenter* const center = [NSNotificationCenter defaultCenter];
     [center addObserver:self
                selector:@selector(puglWindowFocusChanged:)
                    name:NSWindowDidBecomeKeyNotification
-                 object:observedWindow];
+                 object:window];
     [center addObserver:self
                selector:@selector(puglWindowFocusChanged:)
                    name:NSWindowDidResignKeyNotification
-                 object:observedWindow];
+                 object:window];
   }
 }
 
@@ -1646,6 +1656,7 @@ puglShow(PuglView* view, const PuglShowCommand command)
   if (view->parent) {
     [impl->wrapperView setHidden:NO];
     [impl->drawView setNeedsDisplay:YES];
+    (void)dispatchCurrentChildViewConfiguration(view);
     return PUGL_SUCCESS;
   }
 
@@ -1683,7 +1694,7 @@ puglHide(PuglView* view)
       [window makeFirstResponder:nil];
     }
 
-    [wrapper puglSetEmbeddedFocus:NO];
+    (void)dispatchCurrentChildViewConfiguration(view);
   } else {
     [impl->window setIsVisible:NO];
   }
@@ -1701,8 +1712,8 @@ puglFreeViewInternals(PuglView* view)
 
     if (view->impl) {
       if (view->impl->wrapperView) {
-        [view->impl->wrapperView removeFromSuperview];
         view->impl->wrapperView->puglview = NULL;
+        [view->impl->wrapperView removeFromSuperview];
       }
 
       if (view->impl->window) {
@@ -1725,20 +1736,31 @@ puglFreeViewInternals(PuglView* view)
 PuglStatus
 puglGrabFocus(PuglView* view)
 {
-  NSWindow* window = [view->impl->wrapperView window];
+  PuglWrapperView* const wrapper = view->impl->wrapperView;
+  NSWindow* const        window  = [wrapper window];
+
+  if (!wrapper || !window || [wrapper isHiddenOrHasHiddenAncestor] ||
+      ![window isVisible]) {
+    return PUGL_FAILURE;
+  }
 
   [window makeKeyWindow];
-  [window makeFirstResponder:view->impl->wrapperView];
-  return PUGL_SUCCESS;
+  if (![window isKeyWindow]) {
+    return PUGL_FAILURE;
+  }
+
+  return [window makeFirstResponder:wrapper] ? PUGL_SUCCESS : PUGL_FAILURE;
 }
 
 bool
 puglHasFocus(const PuglView* view)
 {
-  PuglInternals* const impl = view->impl;
+  PuglWrapperView* const wrapper = view->impl->wrapperView;
+  NSWindow* const        window  = [wrapper window];
 
-  return ([[impl->wrapperView window] isKeyWindow] &&
-          [[impl->wrapperView window] firstResponder] == impl->wrapperView);
+  return wrapper && window && [window isVisible] &&
+         ![wrapper isHiddenOrHasHiddenAncestor] && [window isKeyWindow] &&
+         [window firstResponder] == wrapper;
 }
 
 PuglStatus

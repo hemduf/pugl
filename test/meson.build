@@ -123,6 +123,7 @@ if platform == 'mac'
       dependencies: [m_dep, pugl_dep, pugl_stub_dep],
       implicit_include_directories: false,
     ),
+    is_parallel: false,
     suite: 'unit',
   )
 endif

@@ -70,6 +70,9 @@ main(void)
 {
   NSAutoreleasePool* const pool = [NSAutoreleasePool new];
 
+  PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
+  assert(world);
+
   NSRect const frame = NSMakeRect(0.0, 0.0, 320.0, 200.0);
   NSWindow* const host =
     [[NSWindow alloc] initWithContentRect:frame
@@ -83,9 +86,7 @@ main(void)
   [host setContentView:parent];
   assert([host makeFirstResponder:sentinel]);
 
-  PuglWorld* const world = puglNewWorld(PUGL_MODULE, 0U);
   PuglView* const view = puglNewView(world);
-  assert(world);
   assert(view);
 
   TestState state = {0U, 0U, 0U};
@@ -102,23 +103,31 @@ main(void)
   NSView* const nativeView = (NSView*)puglGetNativeView(view);
   assert(nativeView);
   assert([nativeView isHidden]);
+  assert(!puglGetVisible(view));
+  assert(!puglHasFocus(view));
   assert([host firstResponder] == sentinel);
   assert(![host isVisible]);
 
-  // Showing an embedded child never maps or raises its borrowed host window.
+  // Showing an embedded child maps only the child and never raises its host.
   assert(!puglShow(view, PUGL_SHOW_PASSIVE));
   assert(![nativeView isHidden]);
+  assert(puglGetVisible(view));
+  assert(!puglHasFocus(view));
+  assert(puglGrabFocus(view) == PUGL_FAILURE);
   assert(![host isVisible]);
   assert([host firstResponder] == sentinel);
 
+  [NSApp activateIgnoringOtherApps:YES];
   [host makeKeyAndOrderFront:nil];
   assert([host isVisible]);
   assert([host isKeyWindow]);
   assert([host firstResponder] == sentinel);
+  assert(!puglHasFocus(view));
 
   // A user click transfers keyboard focus to the embedded view before input.
   [(id)nativeView mouseDown:mouseDownEvent(host)];
   assert([host firstResponder] == nativeView);
+  assert(puglHasFocus(view));
   assert(state.focusIn == 1U);
   assert(state.focusOut == 0U);
   assert(state.buttonPresses == 1U);
@@ -126,6 +135,8 @@ main(void)
   // Hiding only the child releases its focus and leaves the host mapped.
   assert(!puglHide(view));
   assert([nativeView isHidden]);
+  assert(!puglGetVisible(view));
+  assert(!puglHasFocus(view));
   assert([host isVisible]);
   assert([host firstResponder] != nativeView);
   assert(state.focusIn == 1U);
@@ -134,20 +145,30 @@ main(void)
   // Passive show does not steal focus back.
   assert(!puglShow(view, PUGL_SHOW_PASSIVE));
   assert(![nativeView isHidden]);
+  assert(puglGetVisible(view));
+  assert(!puglHasFocus(view));
   assert([host firstResponder] != nativeView);
   assert(state.focusIn == 1U);
 
   [(id)nativeView mouseDown:mouseDownEvent(host)];
   assert(state.focusIn == 2U);
   assert([host firstResponder] == nativeView);
+  assert(puglHasFocus(view));
 
   // Borrowed-window key transitions are reflected as Pugl focus transitions.
   [host resignKeyWindow];
   assert(state.focusOut == 2U);
+  assert(!puglHasFocus(view));
   [host makeKeyWindow];
   assert(state.focusIn == 3U);
+  assert(puglHasFocus(view));
 
+  // Destroying a focused child must not call user code or destroy its host.
   puglFreeView(view);
+  assert(state.focusOut == 2U);
+  assert([host isVisible]);
+  assert([host contentView] == parent);
+
   puglFreeWorld(world);
 
   [host orderOut:nil];
