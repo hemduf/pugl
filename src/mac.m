@@ -1672,9 +1672,12 @@ puglShow(PuglView* view, const PuglShowCommand command)
   }
 
   if (view->parent) {
-    [impl->wrapperView setHidden:NO];
-    [impl->drawView setNeedsDisplay:YES];
-    (void)dispatchCurrentChildViewConfiguration(view);
+    if ([impl->wrapperView isHidden]) {
+      [impl->wrapperView setHidden:NO];
+      [impl->drawView setNeedsDisplay:YES];
+      (void)dispatchCurrentChildViewConfiguration(view);
+    }
+
     return PUGL_SUCCESS;
   }
 
@@ -1705,11 +1708,14 @@ puglHide(PuglView* view)
 
   if (view->parent) {
     PuglWrapperView* const wrapper = impl->wrapperView;
-    [wrapper setHidden:YES];
 
-    // Publish the hidden state before releasing focus, since the focus callback
-    // may synchronously destroy or unrealize the view.
-    (void)dispatchCurrentChildViewConfiguration(view);
+    if (wrapper && ![wrapper isHidden]) {
+      [wrapper setHidden:YES];
+
+      // Publish the hidden state before releasing focus, since the focus
+      // callback may synchronously destroy or unrealize the view.
+      (void)dispatchCurrentChildViewConfiguration(view);
+    }
 
     NSWindow* const window = [wrapper window];
     if ([window firstResponder] == wrapper) {

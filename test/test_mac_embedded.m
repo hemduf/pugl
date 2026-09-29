@@ -37,6 +37,7 @@
 @end
 
 typedef struct {
+  unsigned configures;
   unsigned focusIn;
   unsigned focusOut;
   unsigned buttonPresses;
@@ -48,6 +49,9 @@ onEvent(PuglView* const view, const PuglEvent* const event)
   TestState* const state = (TestState*)puglGetHandle(view);
 
   switch (event->type) {
+  case PUGL_CONFIGURE:
+    ++state->configures;
+    break;
   case PUGL_FOCUS_IN:
     ++state->focusIn;
     break;
@@ -102,7 +106,7 @@ main(void)
   PuglView* const view = puglNewView(world);
   assert(view);
 
-  TestState state = {0U, 0U, 0U};
+  TestState state = {0U, 0U, 0U, 0U};
 
   puglSetWorldString(world, PUGL_CLASS_NAME, "PuglMacEmbeddedTest");
   puglSetBackend(view, puglStubBackend());
@@ -129,10 +133,15 @@ main(void)
   assert(!puglShow(view, PUGL_SHOW_PASSIVE));
   assert(![nativeView isHidden]);
   assert(puglGetVisible(view));
+  assert(state.configures == 1U);
   assert(!puglHasFocus(view));
   assert(puglGrabFocus(view) == PUGL_FAILURE);
   assert(![host isVisible]);
   assert([host firstResponder] == sentinel);
+
+  // Repeating show is idempotent and does not synthesize configuration.
+  assert(!puglShow(view, PUGL_SHOW_PASSIVE));
+  assert(state.configures == 1U);
 
   // Model host activation explicitly so this is deterministic on headless CI.
   [host setIsVisible:YES];
@@ -160,13 +169,20 @@ main(void)
   assert(!puglHasFocus(view));
   assert([host isVisible]);
   assert([host firstResponder] != nativeView);
+  assert(state.configures == 2U);
   assert(state.focusIn == 1U);
+  assert(state.focusOut == 1U);
+
+  // Repeating hide is idempotent and does not synthesize configuration.
+  assert(!puglHide(view));
+  assert(state.configures == 2U);
   assert(state.focusOut == 1U);
 
   // Passive show does not steal focus back.
   assert(!puglShow(view, PUGL_SHOW_PASSIVE));
   assert(![nativeView isHidden]);
   assert(puglGetVisible(view));
+  assert(state.configures == 3U);
   assert(!puglHasFocus(view));
   assert([host firstResponder] != nativeView);
   assert(state.focusIn == 1U);
