@@ -13,6 +13,19 @@
 #include <assert.h>
 #include <stdbool.h>
 
+@interface PuglTestWindow : NSWindow {
+@public
+  BOOL puglTestKeyWindow;
+}
+@end
+
+@implementation PuglTestWindow
+- (BOOL)isKeyWindow
+{
+  return puglTestKeyWindow;
+}
+@end
+
 @interface PuglTestResponderView : NSView
 @end
 
@@ -74,11 +87,11 @@ main(void)
   assert(world);
 
   NSRect const frame = NSMakeRect(0.0, 0.0, 320.0, 200.0);
-  NSWindow* const host =
-    [[NSWindow alloc] initWithContentRect:frame
-                               styleMask:NSWindowStyleMaskTitled
-                                 backing:NSBackingStoreBuffered
-                                   defer:NO];
+  PuglTestWindow* const host =
+    [[PuglTestWindow alloc] initWithContentRect:frame
+                                     styleMask:NSWindowStyleMaskTitled
+                                       backing:NSBackingStoreBuffered
+                                         defer:NO];
   NSView* const parent = [[NSView alloc] initWithFrame:frame];
   NSView* const sentinel =
     [[PuglTestResponderView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
@@ -97,6 +110,10 @@ main(void)
   puglSetEventFunc(view, onEvent);
   puglSetParent(view, (PuglNativeView)parent);
   puglSetSizeHint(view, PUGL_DEFAULT_SIZE, 160U, 100U);
+
+  // Hiding an unrealized embedded view is a harmless no-op.
+  assert(!puglHide(view));
+  assert(!puglGetVisible(view));
 
   assert(!puglRealize(view));
 
@@ -117,8 +134,12 @@ main(void)
   assert(![host isVisible]);
   assert([host firstResponder] == sentinel);
 
-  [NSApp activateIgnoringOtherApps:YES];
-  [host makeKeyAndOrderFront:nil];
+  // Model host activation explicitly so this is deterministic on headless CI.
+  [host setIsVisible:YES];
+  host->puglTestKeyWindow = YES;
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:NSWindowDidBecomeKeyNotification
+                  object:host];
   assert([host isVisible]);
   assert([host isKeyWindow]);
   assert([host firstResponder] == sentinel);
@@ -156,10 +177,17 @@ main(void)
   assert(puglHasFocus(view));
 
   // Borrowed-window key transitions are reflected as Pugl focus transitions.
-  [host resignKeyWindow];
+  host->puglTestKeyWindow = NO;
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:NSWindowDidResignKeyNotification
+                  object:host];
   assert(state.focusOut == 2U);
   assert(!puglHasFocus(view));
-  [host makeKeyWindow];
+
+  host->puglTestKeyWindow = YES;
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:NSWindowDidBecomeKeyNotification
+                  object:host];
   assert(state.focusIn == 3U);
   assert(puglHasFocus(view));
 

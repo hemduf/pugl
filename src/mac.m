@@ -189,12 +189,12 @@ getCurrentViewStyleFlags(PuglView* const view)
 static PuglStatus
 dispatchCurrentChildViewConfiguration(PuglView* const view)
 {
-  const NSRect framePt = [view->impl->wrapperView frame];
-  const NSRect framePx = nsRectFromPoints(view, framePt);
-
   if (view->stage < PUGL_VIEW_STAGE_REALIZED) {
     return PUGL_SUCCESS;
   }
+
+  const NSRect framePt = [view->impl->wrapperView frame];
+  const NSRect framePx = nsRectFromPoints(view, framePt);
 
   const PuglConfigureEvent ev = {
     PUGL_CONFIGURE,
@@ -370,7 +370,13 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
 
   PuglEvent event = {{focused ? PUGL_FOCUS_IN : PUGL_FOCUS_OUT, 0U}};
   event.focus.mode = PUGL_CROSSING_NORMAL;
-  puglDispatchEvent(puglview, &event);
+
+  // Keep the native callback target alive if the event destroys/unrealizes
+  // the Pugl view.  No Pugl state is accessed after application code returns.
+  PuglView* const view = puglview;
+  [self retain];
+  puglDispatchEvent(view, &event);
+  [self release];
 }
 
 - (void)puglWindowFocusChanged:(NSNotification*)notification
@@ -823,7 +829,19 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
 - (void)mouseDown:(NSEvent*)event
 {
   if (puglview->parent && ![self isHiddenOrHasHiddenAncestor]) {
+    PuglView* const view = puglview;
+
+    [self retain];
     [[self window] makeFirstResponder:self];
+
+    const bool viewIsAlive =
+      puglview == view && puglview && puglview->impl &&
+      puglview->impl->wrapperView == self;
+    [self release];
+
+    if (!viewIsAlive) {
+      return;
+    }
   }
 
   const NSPoint         wloc = [self eventLocation:event];
@@ -1689,12 +1707,14 @@ puglHide(PuglView* view)
     PuglWrapperView* const wrapper = impl->wrapperView;
     [wrapper setHidden:YES];
 
+    // Publish the hidden state before releasing focus, since the focus callback
+    // may synchronously destroy or unrealize the view.
+    (void)dispatchCurrentChildViewConfiguration(view);
+
     NSWindow* const window = [wrapper window];
     if ([window firstResponder] == wrapper) {
       [window makeFirstResponder:nil];
     }
-
-    (void)dispatchCurrentChildViewConfiguration(view);
   } else {
     [impl->window setIsVisible:NO];
   }
