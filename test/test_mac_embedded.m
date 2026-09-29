@@ -296,6 +296,54 @@ main(void)
   assert([host isVisible]);
   assert([host contentView] == parent);
 
+  // Two simultaneous children must keep focus and lifecycle state isolated.
+  TestState firstState  = {0U, 0U, 0U, 0U};
+  TestState secondState = {0U, 0U, 0U, 0U};
+  PuglView* const firstView =
+    newEmbeddedView(world, parent, &firstState, onEvent);
+  PuglView* const secondView =
+    newEmbeddedView(world, parent, &secondState, onEvent);
+
+  assert(!puglRealize(firstView));
+  assert(!puglRealize(secondView));
+  assert(!puglShow(firstView, PUGL_SHOW_PASSIVE));
+  assert(!puglShow(secondView, PUGL_SHOW_PASSIVE));
+
+  NSView* const firstNative  = (NSView*)puglGetNativeView(firstView);
+  NSView* const secondNative = (NSView*)puglGetNativeView(secondView);
+  assert(firstNative);
+  assert(secondNative);
+
+  [(id)firstNative mouseDown:mouseDownEvent(host)];
+  assert(puglHasFocus(firstView));
+  assert(!puglHasFocus(secondView));
+  assert(firstState.focusIn == 1U);
+  assert(secondState.focusIn == 0U);
+
+  [(id)secondNative mouseDown:mouseDownEvent(host)];
+  assert(!puglHasFocus(firstView));
+  assert(puglHasFocus(secondView));
+  assert(firstState.focusOut == 1U);
+  assert(secondState.focusIn == 1U);
+
+  // Destroying A must not alter B's focus or observer state.
+  puglFreeView(firstView);
+  assert(puglHasFocus(secondView));
+  assert(secondState.focusOut == 0U);
+  assert([host contentView] == parent);
+
+  assert(!puglHide(secondView));
+  assert(secondState.focusOut == 1U);
+  assert(!puglHasFocus(secondView));
+  assert(!puglShow(secondView, PUGL_SHOW_PASSIVE));
+  [(id)secondNative mouseDown:mouseDownEvent(host)];
+  assert(puglHasFocus(secondView));
+  assert(secondState.focusIn == 2U);
+
+  puglFreeView(secondView);
+  assert(secondState.focusOut == 1U);
+  assert([host contentView] == parent);
+
   // A configure callback may synchronously hide again; the nested transition
   // must win instead of being overwritten by the outer show.
   CallbackState reentrant = {
