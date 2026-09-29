@@ -113,6 +113,18 @@ if platform == 'mac'
     ),
     suite: 'unit',
   )
+
+  test(
+    'mac_embedded',
+    executable(
+      'test_mac_embedded',
+      'test_mac_embedded.m',
+      objc_args: objc_suppressions,
+      dependencies: [m_dep, pugl_dep, pugl_stub_dep],
+      implicit_include_directories: false,
+    ),
+    suite: 'unit',
+  )
 endif
 
 # Win32 native drag-and-drop regression
