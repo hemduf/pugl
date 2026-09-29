@@ -13,6 +13,16 @@
 #include <assert.h>
 #include <stdbool.h>
 
+@interface PuglTestResponderView : NSView
+@end
+
+@implementation PuglTestResponderView
+- (BOOL)acceptsFirstResponder
+{
+  return YES;
+}
+@end
+
 typedef struct {
   unsigned focusIn;
   unsigned focusOut;
@@ -67,7 +77,8 @@ main(void)
                                  backing:NSBackingStoreBuffered
                                    defer:NO];
   NSView* const parent = [[NSView alloc] initWithFrame:frame];
-  NSView* const sentinel = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+  NSView* const sentinel =
+    [[PuglTestResponderView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
   [parent addSubview:sentinel];
   [host setContentView:parent];
   assert([host makeFirstResponder:sentinel]);
