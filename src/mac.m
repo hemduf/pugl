@@ -365,11 +365,22 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
   return YES;
 }
 
+- (BOOL)puglPreserveEmbeddedFocus
+{
+  return NO;
+}
+
 - (void)puglSetEmbeddedFocus:(BOOL)focused
 {
   if (!puglview || !puglview->parent ||
       puglview->stage < PUGL_VIEW_STAGE_REALIZED ||
       embeddedFocused == (bool)focused) {
+    return;
+  }
+
+  if (observedWindow && observedWindow == [self window] &&
+      [observedWindow isKeyWindow] && ![self isHiddenOrHasHiddenAncestor] &&
+      [self puglPreserveEmbeddedFocus]) {
     return;
   }
 
@@ -955,7 +966,8 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
 
 - (void)keyDown:(NSEvent*)event
 {
-  if (puglview->hints[PUGL_IGNORE_KEY_REPEAT] && [event isARepeat]) {
+  if (!puglview ||
+      (puglview->hints[PUGL_IGNORE_KEY_REPEAT] && [event isARepeat])) {
     return;
   }
 
@@ -981,15 +993,21 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
 
   PuglEvent pressEvent;
   pressEvent.key = ev;
+  [self retain];
   puglDispatchEvent(puglview, &pressEvent);
 
-  if (!spec) {
+  if (puglview && !spec) {
     [self interpretKeyEvents:@[event]];
   }
+  [self release];
 }
 
 - (void)keyUp:(NSEvent*)event
 {
+  if (!puglview) {
+    return;
+  }
+
   const NSPoint   wloc  = [self eventLocation:event];
   const NSPoint   rloc  = [NSEvent mouseLocation];
   const PuglKey   spec  = keySymToSpecial(event);
@@ -1012,7 +1030,9 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
 
   PuglEvent releaseEvent;
   releaseEvent.key = ev;
+  [self retain];
   puglDispatchEvent(puglview, &releaseEvent);
+  [self release];
 }
 
 /* NSTextInputClient */
@@ -1090,7 +1110,18 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
 {
   (void)replacement;
 
-  NSEvent* const  event = [NSApp currentEvent];
+  if (!puglview) {
+    return;
+  }
+
+  // IME and accessibility text can arrive outside keyboard event dispatch.
+  // AppKit raises an exception if keyCode is queried on other event types.
+  NSEvent* const  current = [NSApp currentEvent];
+  NSEvent* const  event   = ([current type] == NSEventTypeKeyDown ||
+                             [current type] == NSEventTypeKeyUp ||
+                             [current type] == NSEventTypeFlagsChanged)
+                              ? current
+                              : nil;
   NSString* const characters =
     ([(NSObject*)string isKindOfClass:[NSAttributedString class]]
        ? [(NSAttributedString*)string string]
@@ -1098,7 +1129,8 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
 
   const NSPoint wloc = [self eventLocation:event];
   const NSPoint rloc = [NSEvent mouseLocation];
-  for (size_t i = 0; i < [characters length]; ++i) {
+  [self retain];
+  for (size_t i = 0; puglview && i < [characters length]; ++i) {
     const uint32_t code    = [characters characterAtIndex:i];
     char           utf8[8] = {0};
     NSUInteger     len     = 0;
@@ -1131,6 +1163,7 @@ handleCrossing(PuglWrapperView* view, NSEvent* event, const PuglEventType type)
     textEvent.text = ev;
     puglDispatchEvent(puglview, &textEvent);
   }
+  [self release];
 }
 
 static bool
@@ -1141,6 +1174,10 @@ flagDiffers(const uint32_t lhs, const uint32_t rhs, const uint32_t mask)
 
 - (void)flagsChanged:(NSEvent*)event
 {
+  if (!puglview) {
+    return;
+  }
+
   const uint32_t mods    = getModifiers(event);
   PuglEventType  type    = PUGL_NOTHING;
   PuglKey        special = PUGL_KEY_NONE;
@@ -1164,6 +1201,7 @@ flagDiffers(const uint32_t lhs, const uint32_t rhs, const uint32_t mask)
       ([event type] == NSEventTypeKeyUp) ? PUGL_KEY_RELEASE : PUGL_KEY_PRESS;
   }
 
+  [self retain];
   if (special != 0) {
     const NSPoint wloc = [self eventLocation:event];
     const NSPoint rloc = [NSEvent mouseLocation];
@@ -1184,7 +1222,10 @@ flagDiffers(const uint32_t lhs, const uint32_t rhs, const uint32_t mask)
     puglDispatchEvent(puglview, &keyEvent);
   }
 
-  puglview->impl->mods = mods;
+  if (puglview) {
+    puglview->impl->mods = mods;
+  }
+  [self release];
 }
 
 - (BOOL)preservesContentInLiveResize
@@ -1649,6 +1690,9 @@ puglUnrealize(PuglView* const view)
   }
 
   if (impl->wrapperView) {
+    // Detaching invokes Cocoa responder callbacks.  Retire the native wrapper
+    // first so they cannot dispatch to an unrealized or destroyed Pugl view.
+    impl->wrapperView->puglview = NULL;
     [impl->wrapperView removeFromSuperview];
   }
 
@@ -1680,10 +1724,22 @@ puglShow(PuglView* view, const PuglShowCommand command)
   }
 
   if (view->parent) {
-    if ([impl->wrapperView isHidden]) {
-      [impl->wrapperView setHidden:NO];
-      [impl->drawView setNeedsDisplay:YES];
-      (void)dispatchCurrentChildViewConfiguration(view);
+    PuglWrapperView* const wrapper = impl->wrapperView;
+    if ([wrapper isHidden]) {
+      [wrapper retain];
+      [wrapper setHidden:NO];
+
+      // Native visibility callbacks can retire or hide the view again.
+      PuglView* const liveView = wrapper->puglview;
+      const bool viewStillVisible =
+        liveView == view && liveView && liveView->impl &&
+        liveView->impl->wrapperView == wrapper && ![wrapper isHidden];
+      if (viewStillVisible) {
+        [liveView->impl->drawView setNeedsDisplay:YES];
+        (void)dispatchCurrentChildViewConfiguration(liveView);
+      }
+
+      [wrapper release];
     }
 
     return PUGL_SUCCESS;
@@ -1721,12 +1777,17 @@ puglHide(PuglView* view)
       [wrapper retain];
       [wrapper setHidden:YES];
 
-      // Publish the hidden state before releasing focus.  Configuration and
-      // focus callbacks may synchronously destroy, unrealize, or re-show this
-      // view, so keep the native object alive and revalidate before continuing.
-      (void)dispatchCurrentChildViewConfiguration(view);
+      // Even setHidden can synchronously dispatch FOCUS_OUT and retire or
+      // re-show this view.  Recover live state only from the retained wrapper.
+      PuglView* liveView = wrapper->puglview;
+      const bool viewCanConfigure =
+        liveView == view && liveView && liveView->impl &&
+        liveView->impl->wrapperView == wrapper && [wrapper isHidden];
+      if (viewCanConfigure) {
+        (void)dispatchCurrentChildViewConfiguration(liveView);
+      }
 
-      PuglView* const liveView = wrapper->puglview;
+      liveView = wrapper->puglview;
       const bool viewStillHidden =
         liveView == view && liveView && liveView->impl &&
         liveView->impl->wrapperView == wrapper && [wrapper isHidden];
