@@ -18,6 +18,10 @@
 - (void)dispatchExpose:(NSRect)rect;
 - (void)setReshaped;
 
+// A subclass may preserve logical focus during a temporary responder handoff.
+// It must return NO when the view is hidden, detached, or its host loses focus.
+- (BOOL)puglPreserveEmbeddedFocus;
+
 @end
 
 @interface PuglWindow : NSWindow

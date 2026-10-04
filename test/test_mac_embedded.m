@@ -9,9 +9,24 @@
 #include <pugl/stub.h>
 
 #import <Cocoa/Cocoa.h>
+#import <objc/message.h>
+#import <objc/runtime.h>
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static void
+check(const bool condition, const char* const expression, const unsigned line)
+{
+  if (!condition) {
+    fprintf(stderr, "test_mac_embedded.m:%u: %s\n", line, expression);
+    exit(EXIT_FAILURE);
+  }
+}
+
+#define CHECK(condition) check((condition), #condition, __LINE__)
 
 @interface PuglTestWindow : NSWindow {
 @public
@@ -46,9 +61,14 @@ typedef struct {
 typedef enum {
   CALLBACK_NONE,
   CALLBACK_HIDE_ON_MAPPED_CONFIGURE,
+  CALLBACK_SHOW_ON_UNMAPPED_CONFIGURE,
   CALLBACK_FREE_ON_CONFIGURE,
   CALLBACK_FREE_ON_FOCUS_IN,
   CALLBACK_FREE_ON_FOCUS_OUT,
+  CALLBACK_UNREALIZE_ON_FOCUS_OUT,
+  CALLBACK_SHOW_ON_FOCUS_OUT,
+  CALLBACK_FREE_ON_NATIVE_SHOW,
+  CALLBACK_UNREALIZE_ON_NATIVE_SHOW,
 } CallbackAction;
 
 typedef struct {
@@ -97,6 +117,10 @@ onCallbackEvent(PuglView* const view, const PuglEvent* const event)
         (event->configure.style & PUGL_VIEW_STYLE_MAPPED)) {
       state->action = CALLBACK_NONE;
       assert(!puglHide(view));
+    } else if (state->action == CALLBACK_SHOW_ON_UNMAPPED_CONFIGURE &&
+               !(event->configure.style & PUGL_VIEW_STYLE_MAPPED)) {
+      state->action = CALLBACK_NONE;
+      CHECK(!puglShow(view, PUGL_SHOW_PASSIVE));
     } else if (state->action == CALLBACK_FREE_ON_CONFIGURE) {
       state->action = CALLBACK_NONE;
       state->view   = NULL;
@@ -119,6 +143,12 @@ onCallbackEvent(PuglView* const view, const PuglEvent* const event)
       state->action = CALLBACK_NONE;
       state->view   = NULL;
       puglFreeView(view);
+    } else if (state->action == CALLBACK_UNREALIZE_ON_FOCUS_OUT) {
+      state->action = CALLBACK_NONE;
+      CHECK(!puglUnrealize(view));
+    } else if (state->action == CALLBACK_SHOW_ON_FOCUS_OUT) {
+      state->action = CALLBACK_NONE;
+      CHECK(!puglShow(view, PUGL_SHOW_PASSIVE));
     }
     break;
 
@@ -163,6 +193,76 @@ mouseDownEvent(NSWindow* const window)
                          eventNumber:1
                           clickCount:1
                             pressure:1.0];
+}
+
+static const char visibilityStateKey = 0;
+static Class      visibilityClass;
+
+static void
+nativeSetHidden(id const self, SEL const selector, const BOOL hidden)
+{
+  struct objc_super superclass = {self, class_getSuperclass(visibilityClass)};
+  ((void (*)(struct objc_super*, SEL, BOOL))objc_msgSendSuper)(
+    &superclass, selector, hidden);
+
+  CallbackState* const state = (CallbackState*)[(
+    NSValue*)objc_getAssociatedObject(self, &visibilityStateKey) pointerValue];
+  if (!hidden && state && state->view) {
+    const CallbackAction action = state->action;
+    if (action == CALLBACK_FREE_ON_NATIVE_SHOW) {
+      state->action        = CALLBACK_NONE;
+      PuglView* const view = state->view;
+      state->view          = NULL;
+      puglFreeView(view);
+    } else if (action == CALLBACK_UNREALIZE_ON_NATIVE_SHOW) {
+      state->action = CALLBACK_NONE;
+      CHECK(!puglUnrealize(state->view));
+    }
+  }
+}
+
+static void
+testNativeShowRetirement(PuglWorld* const     world,
+                         NSView* const        parent,
+                         const CallbackAction action)
+{
+  CallbackState state = {NULL, action, 0U, 0U, 0U, 0U};
+  state.view          = newEmbeddedView(world, parent, &state, onCallbackEvent);
+  CHECK(!puglRealize(state.view));
+
+  NSView* const native        = [(NSView*)puglGetNativeView(state.view) retain];
+  Class const   originalClass = object_getClass(native);
+  if (!visibilityClass) {
+    visibilityClass =
+      objc_allocateClassPair(originalClass, "PuglTestVisibilityWrapper", 0U);
+    CHECK(visibilityClass);
+    CHECK(class_addMethod(visibilityClass,
+                          @selector(setHidden:),
+                          (IMP)nativeSetHidden,
+                          method_getTypeEncoding(class_getInstanceMethod(
+                            originalClass, @selector(setHidden:)))));
+    objc_registerClassPair(visibilityClass);
+  }
+
+  objc_setAssociatedObject(native,
+                           &visibilityStateKey,
+                           [NSValue valueWithPointer:&state],
+                           OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  object_setClass(native, visibilityClass);
+  CHECK(!puglShow(state.view, PUGL_SHOW_PASSIVE));
+  CHECK(state.configures == 0U);
+  CHECK(action == CALLBACK_FREE_ON_NATIVE_SHOW ? state.view == NULL
+                                               : state.view != NULL);
+  if (state.view) {
+    CHECK(!puglGetNativeView(state.view));
+    puglFreeView(state.view);
+  }
+
+  // Remove the stack-state association before releasing this borrowed target.
+  object_setClass(native, originalClass);
+  objc_setAssociatedObject(
+    native, &visibilityStateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  [native release];
 }
 
 int
@@ -414,6 +514,54 @@ main(void)
   assert(freeOnFocusOut.view == NULL);
   assert(freeOnFocusOut.focusOut == 1U);
   assert([host contentView] == parent);
+
+  // Native focus loss can retire the wrapper without freeing the C view.
+  CallbackState unrealizeOnFocusOut = {NULL, CALLBACK_NONE, 0U, 0U, 0U, 0U};
+  unrealizeOnFocusOut.view =
+    newEmbeddedView(world, parent, &unrealizeOnFocusOut, onCallbackEvent);
+  CHECK(!puglRealize(unrealizeOnFocusOut.view));
+  CHECK(!puglShow(unrealizeOnFocusOut.view, PUGL_SHOW_PASSIVE));
+  NSView* const unrealizeNative =
+    (NSView*)puglGetNativeView(unrealizeOnFocusOut.view);
+  [(id)unrealizeNative mouseDown:mouseDownEvent(host)];
+  unrealizeOnFocusOut.action = CALLBACK_UNREALIZE_ON_FOCUS_OUT;
+  CHECK(!puglHide(unrealizeOnFocusOut.view));
+  CHECK(unrealizeOnFocusOut.focusOut == 1U);
+  CHECK(!puglGetNativeView(unrealizeOnFocusOut.view));
+  puglFreeView(unrealizeOnFocusOut.view);
+
+  // A nested re-show from native focus loss wins over the outer hide.
+  CallbackState showOnFocusOut = {NULL, CALLBACK_NONE, 0U, 0U, 0U, 0U};
+  showOnFocusOut.view =
+    newEmbeddedView(world, parent, &showOnFocusOut, onCallbackEvent);
+  CHECK(!puglRealize(showOnFocusOut.view));
+  CHECK(!puglShow(showOnFocusOut.view, PUGL_SHOW_PASSIVE));
+  NSView* const showNative = (NSView*)puglGetNativeView(showOnFocusOut.view);
+  [(id)showNative mouseDown:mouseDownEvent(host)];
+  showOnFocusOut.action = CALLBACK_SHOW_ON_FOCUS_OUT;
+  CHECK(!puglHide(showOnFocusOut.view));
+  CHECK(showOnFocusOut.focusOut == 1U);
+  CHECK(showOnFocusOut.configures == 2U);
+  CHECK(![showNative isHidden]);
+  CHECK(puglGetVisible(showOnFocusOut.view));
+  puglFreeView(showOnFocusOut.view);
+
+  // A nested re-show from the unmapped configuration also wins.
+  CallbackState showOnConfigure = {NULL, CALLBACK_NONE, 0U, 0U, 0U, 0U};
+  showOnConfigure.view =
+    newEmbeddedView(world, parent, &showOnConfigure, onCallbackEvent);
+  CHECK(!puglRealize(showOnConfigure.view));
+  CHECK(!puglShow(showOnConfigure.view, PUGL_SHOW_PASSIVE));
+  showOnConfigure.action = CALLBACK_SHOW_ON_UNMAPPED_CONFIGURE;
+  CHECK(!puglHide(showOnConfigure.view));
+  CHECK(showOnConfigure.configures == 3U);
+  CHECK(puglGetVisible(showOnConfigure.view));
+  puglFreeView(showOnConfigure.view);
+
+  // A consumer's native visibility callback can retire the view while show
+  // is unwinding, before it can access the drawing view or configure state.
+  testNativeShowRetirement(world, parent, CALLBACK_FREE_ON_NATIVE_SHOW);
+  testNativeShowRetirement(world, parent, CALLBACK_UNREALIZE_ON_NATIVE_SHOW);
 
   puglFreeWorld(world);
 
